@@ -62,3 +62,19 @@ def test_deepseek_chat_stream(mock_openai_class):
     llm = DeepSeekLLM(api_key="test", model="deepseek-chat", base_url="https://api.test.com")
     tokens = list(llm.chat_stream([{"role": "user", "content": "你好"}]))
     assert tokens == ["你好 ", "世界"]
+
+
+def test_get_llm_returns_openai_compat():
+    config = {
+        "llm": {
+            "provider": "openai_compat",
+            "openai_compat": {
+                "api_key": "test-key",
+                "model": "custom-model",
+                "base_url": "https://custom.api.com/v1",
+            },
+        }
+    }
+    from doubase.generation.openai_compat import OpenAICompatLLM
+    llm = get_llm(config)
+    assert isinstance(llm, OpenAICompatLLM)
