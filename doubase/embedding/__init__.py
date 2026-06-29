@@ -13,6 +13,11 @@ def get_embedder(config: dict) -> BaseEmbedder:
 
     if provider == "zhipu":
         cfg = embedding_config["zhipu"]
+        if not cfg.get("api_key", "").strip():
+            raise ValueError(
+                "智谱 Embedding API Key 未设置。"
+                "请设置环境变量 ZHIPU_API_KEY，或在 config.yaml 中填写 api_key。"
+            )
         return ZhipuEmbedder(
             api_key=cfg["api_key"],
             model=cfg["model"],

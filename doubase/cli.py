@@ -50,6 +50,14 @@ def main():
 
     if args.command is None:
         parser.print_help()
+        print("\n💡 快速开始:")
+        print("  1. 设置 API Key:")
+        print("     export DEEPSEEK_API_KEY=sk-...")
+        print("     export ZHIPU_API_KEY=...")
+        print("  2. 导入笔记:")
+        print("     doubase ingest ~/Documents/notes/")
+        print("  3. 开始提问:")
+        print('     doubase ask "你的问题"')
         sys.exit(0)
 
     # 加载配置
@@ -60,32 +68,36 @@ def main():
         sys.exit(1)
 
     # 路由命令
-    if args.command == "ask":
-        run_ask(
-            question=args.question,
-            config=config,
-            llm_override=args.llm,
-            embedding_override=args.embedding,
-        )
-
-    elif args.command == "ingest":
-        if args.watch:
-            from doubase.watch import run_watch
-            run_watch(config)
-        else:
-            run_ingest(
-                paths=args.paths,
+    try:
+        if args.command == "ask":
+            run_ask(
+                question=args.question,
                 config=config,
-                skip_confirm=args.yes,
+                llm_override=args.llm,
+                embedding_override=args.embedding,
             )
 
-    elif args.command == "analyze":
-        run_analyze(
-            project_dir=args.project,
-            config=config,
-            focus=args.focus,
-            skip_confirm=args.yes,
-        )
+        elif args.command == "ingest":
+            if args.watch:
+                from doubase.watch import run_watch
+                run_watch(config)
+            else:
+                run_ingest(
+                    paths=args.paths,
+                    config=config,
+                    skip_confirm=args.yes,
+                )
+
+        elif args.command == "analyze":
+            run_analyze(
+                project_dir=args.project,
+                config=config,
+                focus=args.focus,
+                skip_confirm=args.yes,
+            )
+    except ValueError as e:
+        print(f"❌ 配置错误: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

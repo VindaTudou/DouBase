@@ -18,6 +18,11 @@ def get_llm(config: dict, override_provider: str = None) -> BaseLLM:
 
     if provider == "deepseek":
         cfg = llm_config["deepseek"]
+        if not cfg.get("api_key", "").strip():
+            raise ValueError(
+                "DeepSeek API Key 未设置。"
+                "请设置环境变量 DEEPSEEK_API_KEY，或在 config.yaml 中填写 api_key。"
+            )
         return DeepSeekLLM(
             api_key=cfg["api_key"],
             model=cfg["model"],
@@ -26,6 +31,12 @@ def get_llm(config: dict, override_provider: str = None) -> BaseLLM:
     elif provider in ("openai", "openai_compat"):
         from doubase.generation.openai_compat import OpenAICompatLLM
         cfg = llm_config[provider]
+        if not cfg.get("api_key", "").strip():
+            env_var = "OPENAI_API_KEY" if provider == "openai" else "CUSTOM_API_KEY"
+            raise ValueError(
+                f"LLM provider '{provider}' 的 API Key 未设置。"
+                f"请设置环境变量 {env_var}，或在 config.yaml 中填写 api_key。"
+            )
         return OpenAICompatLLM(
             api_key=cfg["api_key"],
             model=cfg["model"],

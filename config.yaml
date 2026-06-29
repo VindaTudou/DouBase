@@ -3,8 +3,8 @@ llm:
   provider: deepseek
   deepseek:
     api_key: ${DEEPSEEK_API_KEY}
-    model: deepseek-chat
-    base_url: https://api.deepseek.com/v1
+    model: deepseek-v4-flash
+    base_url: https://api.deepseek.com
   openai:
     api_key: ${OPENAI_API_KEY}
     model: gpt-4o
@@ -19,7 +19,7 @@ embedding:
   provider: zhipu
   zhipu:
     api_key: ${ZHIPU_API_KEY}
-    model: embedding-2
+    model: embedding-3
     base_url: https://open.bigmodel.cn/api/paas/v4
   local:
     model_name: BAAI/bge-small-zh-v1.5
