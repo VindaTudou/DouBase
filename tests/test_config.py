@@ -4,18 +4,25 @@ from doubase.config import load_config, resolve_env_vars
 
 
 def test_resolve_env_vars():
-    os.environ["TEST_VAR"] = "my-secret"
-    config = {
-        "llm": {
-            "api_key": "${TEST_VAR}",
-            "model": "deepseek-chat",
-            "count": 42,
+    old_value = os.environ.get("TEST_VAR")
+    try:
+        os.environ["TEST_VAR"] = "my-secret"
+        config = {
+            "llm": {
+                "api_key": "${TEST_VAR}",
+                "model": "deepseek-chat",
+                "count": 42,
+            }
         }
-    }
-    result = resolve_env_vars(config)
-    assert result["llm"]["api_key"] == "my-secret"
-    assert result["llm"]["model"] == "deepseek-chat"
-    assert result["llm"]["count"] == 42
+        result = resolve_env_vars(config)
+        assert result["llm"]["api_key"] == "my-secret"
+        assert result["llm"]["model"] == "deepseek-chat"
+        assert result["llm"]["count"] == 42
+    finally:
+        if old_value is None:
+            os.environ.pop("TEST_VAR", None)
+        else:
+            os.environ["TEST_VAR"] = old_value
 
 
 def test_resolve_tilde():
