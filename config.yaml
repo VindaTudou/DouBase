@@ -1,0 +1,61 @@
+# LLM 配置
+llm:
+  provider: deepseek
+  deepseek:
+    api_key: ${DEEPSEEK_API_KEY}
+    model: deepseek-chat
+    base_url: https://api.deepseek.com/v1
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    model: gpt-4o
+    base_url: https://api.openai.com/v1
+  openai_compat:
+    api_key: ${CUSTOM_API_KEY}
+    model: your-model
+    base_url: https://your-api.com/v1
+
+# Embedding 配置
+embedding:
+  provider: zhipu
+  zhipu:
+    api_key: ${ZHIPU_API_KEY}
+    model: embedding-2
+    base_url: https://open.bigmodel.cn/api/paas/v4
+  local:
+    model_name: BAAI/bge-small-zh-v1.5
+
+# ChromaDB 配置
+storage:
+  persist_dir: ~/.doubase/vectors
+  collection_name: notes
+
+# 分块配置
+chunker:
+  chunk_size: 512
+  chunk_overlap: 64
+
+# 检索配置
+retrieval:
+  top_k: 5
+
+# 监控目录配置
+watch:
+  inbox_dir: ~/Documents/inbox
+
+# 解析器配置
+parsers:
+  enabled:
+    - markdown
+    - docx
+    - pdf
+
+# API 定价（人民币/百万 tokens，用于费用估算）
+pricing:
+  deepseek:
+    input_price: 1.0
+    output_price: 2.0
+  zhipu:
+    embed_price: 0.5
+  openai:
+    input_price: 2.5
+    output_price: 10.0

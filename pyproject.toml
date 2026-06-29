@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doubase"
+version = "0.1.0"
+description = "本地 RAG agent，支持 Markdown/Word/PDF 笔记检索与代码分析"
+requires-python = ">=3.11"
+dependencies = [
+    "chromadb>=0.5.0",
+    "openai>=1.0.0",
+    "python-docx>=1.0.0",
+    "PyMuPDF>=1.23.0",
+    "tiktoken>=0.5.0",
+    "pyyaml>=6.0",
+    "watchdog>=4.0.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+local-embed = ["sentence-transformers>=2.0.0"]
+
+[project.scripts]
+doubase = "doubase.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["doubase*"]
