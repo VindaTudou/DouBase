@@ -252,3 +252,97 @@ def run_ingest(paths: list[str], config: dict, skip_confirm: bool = False):
     )
 
     return results
+
+
+def _build_ask_prompt(question: str, chunks: list[dict]) -> list[dict]:
+    """构建混合 RAG 提示词：本地知识 + LLM 知识。"""
+    system_prompt = """你是一个知识助手。请综合以下两个来源来回答用户问题:
+1. 用户本地笔记中的相关内容 (见下文)
+2. 你自己的通用知识
+
+规则:
+- 如果本地笔记有相关信息，优先引用，并注明来源文件路径
+- 如果本地笔记没有覆盖的部分，用你自己的知识补充，并标注"[通用知识]"
+- 不要编造本地笔记中不存在的内容
+- 用中文回答"""
+
+    user_parts = [question]
+    if chunks:
+        user_parts.append("\n---\n本地检索结果:")
+        for i, chunk in enumerate(chunks, 1):
+            source = chunk.get("source_path", "unknown")
+            user_parts.append(f"\n[来源 {i}: {source}]\n{chunk['text']}")
+    else:
+        user_parts.append(
+            "\n(本地笔记中未找到相关内容，请使用你的通用知识回答)"
+        )
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "\n".join(user_parts)},
+    ]
+
+
+def run_ask(
+    question: str,
+    config: dict,
+    llm_override: str = None,
+    embedding_override: str = None,
+):
+    """运行 RAG 问答流水线：检索 + 生成回答。
+
+    Args:
+        question: 用户问题。
+        config: 完整配置字典。
+        llm_override: 覆盖 LLM provider（如 "openai"）。
+        embedding_override: 覆盖 embedding provider（如 "local"）。
+    """
+    top_k = config.get("retrieval", {}).get("top_k", 5)
+
+    # 设置组件
+    if embedding_override:
+        embed_config = config.copy()
+        embed_config["embedding"] = embed_config["embedding"].copy()
+        embed_config["embedding"]["provider"] = embedding_override
+        embedder = get_embedder(embed_config)
+    else:
+        embedder = get_embedder(config)
+
+    store = VectorStore(
+        persist_dir=config["storage"]["persist_dir"],
+        collection_name=config["storage"]["collection_name"],
+    )
+
+    llm = get_llm(config, override_provider=llm_override)
+
+    # 检查知识库是否为空
+    if store.count() == 0:
+        console.print(
+            "[yellow]知识库为空。请先执行 doubase ingest 导入笔记。[/yellow]"
+        )
+        console.print("[dim]将仅使用 LLM 自身知识回答...[/dim]")
+        chunks = []
+    else:
+        # 检索
+        retriever = Retriever(embedder=embedder, vector_store=store)
+        chunks = retriever.retrieve(question, top_k=top_k)
+
+        if not chunks:
+            console.print(
+                "[dim]本地笔记中未找到相关内容，将仅使用通用知识回答。[/dim]"
+            )
+        else:
+            console.print(f"[dim]检索到 {len(chunks)} 个相关片段[/dim]")
+
+    # 构建提示词
+    messages = _build_ask_prompt(question, chunks)
+
+    # 流式输出回答
+    console.print()
+    try:
+        for token in llm.chat_stream(messages):
+            console.print(token, end="", highlight=False)
+        console.print()
+    except Exception as e:
+        console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
+        console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")

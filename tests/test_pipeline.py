@@ -43,3 +43,35 @@ def test_estimate_ingest_with_markdown():
         assert est["total_chunks"] >= 1
         assert est["total_tokens"] > 0
         assert est["total_cost"] >= 0
+
+
+from doubase.pipeline import _build_ask_prompt
+
+
+def test_build_ask_prompt_with_chunks():
+    chunks = [
+        {
+            "text": "Redis 使用 RDB 快照",
+            "source_path": "/notes/redis.md",
+            "distance": 0.1,
+        },
+        {
+            "text": "AOF 记录每次写操作",
+            "source_path": "/notes/db.md",
+            "distance": 0.2,
+        },
+    ]
+    messages = _build_ask_prompt("Redis 如何持久化数据？", chunks)
+    assert len(messages) == 2
+    assert messages[0]["role"] == "system"
+    assert "本地笔记" in messages[0]["content"]
+    assert "/notes/redis.md" in messages[1]["content"]
+    assert "/notes/db.md" in messages[1]["content"]
+    assert "Redis 使用 RDB" in messages[1]["content"]
+
+
+def test_build_ask_prompt_empty_chunks():
+    messages = _build_ask_prompt("某个问题", [])
+    assert len(messages) == 2
+    assert "未找到相关内容" in messages[1]["content"]
+    assert "通用知识" in messages[0]["content"]
