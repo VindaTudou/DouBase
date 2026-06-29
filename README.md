@@ -25,10 +25,29 @@ pip install -e ".[local-embed]"
 
 ### 2. 设置 API Key
 
+复制模板文件并填入你的 Key：
+
 ```bash
-export DEEPSEEK_API_KEY=sk-你的-deepseek-key
-export ZHIPU_API_KEY=你的-智谱-key
+cp .env.example .env
 ```
+
+然后编辑 `.env` 文件：
+
+```env
+# 选择 LLM 和 Embedding 提供商
+DOUBASE_LLM_PROVIDER=deepseek          # deepseek / openai / openai_compat
+DOUBASE_EMBEDDING_PROVIDER=zhipu       # zhipu / local
+
+# DeepSeek（LLM）
+DOUBASE_DEEPSEEK_API_KEY=sk-你的-key
+DOUBASE_DEEPSEEK_MODEL=deepseek-chat
+
+# 智谱（Embedding）
+DOUBASE_ZHIPU_API_KEY=你的-key
+DOUBASE_ZHIPU_MODEL=embedding-2
+```
+
+> `.env` 文件已在 `.gitignore` 中排除，不会被提交到仓库。
 
 ### 3. 导入你的笔记
 
@@ -64,23 +83,51 @@ doubase analyze ~/projects/some-repo/ --yes
 
 ## 配置
 
-编辑 `config.yaml` 切换提供商、模型、分块大小等。
+**API Key、模型选择、Provider 切换**全部在 `.env` 文件中管理：
+
+```env
+# 切换 LLM 提供商
+DOUBASE_LLM_PROVIDER=openai
+
+# 切换模型
+DOUBASE_DEEPSEEK_MODEL=deepseek-chat
+DOUBASE_OPENAI_MODEL=gpt-4o
+
+# 切换本地 Embedding（免费，离线）
+DOUBASE_EMBEDDING_PROVIDER=local
+DOUBASE_LOCAL_MODEL_NAME=BAAI/bge-small-zh-v1.5
+```
+
+**运行时参数**（分块大小、检索数量等）在 `config.yaml` 中修改：
 
 ```yaml
-llm:
-  provider: deepseek  # 可改为 openai 或 openai_compat
-
-embedding:
-  provider: zhipu     # 可改为 local 使用离线 embedding
-
 retrieval:
   top_k: 5            # 检索返回的 chunk 数量
 
-pricing:
-  deepseek:
-    input_price: 1.0   # 人民币/百万 tokens
-    output_price: 2.0
+chunker:
+  chunk_size: 512     # 分块大小（tokens）
+  chunk_overlap: 64   # 重叠量（tokens）
 ```
+
+所有可用环境变量见 `.env.example`。
+
+## 数据存储
+
+向量化后的数据存储在 `~/.doubase/vectors/`：
+
+```
+~/.doubase/vectors/
+├── chroma.sqlite3      # 主数据库
+└── <uuid>/             # HNSW 索引文件
+    ├── data_level0.bin
+    ├── header.bin
+    ├── length.bin
+    └── link_lists.bin
+```
+
+分析代码项目时生成的 `.md` 总结文件存放在被分析项目的同级目录 `doubase_summaries/` 中。
+
+> 存储目录可通过 `.env` 中的 `DOUBASE_VECTOR_DIR` 修改。
 
 ## 架构
 
