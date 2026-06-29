@@ -69,3 +69,31 @@ def test_zhipu_embed_query(mock_openai_class):
     )
     result = embedder.embed_query("single query")
     assert result == [0.7, 0.8, 0.9]
+
+
+def test_get_embedder_returns_local_when_configured():
+    config = {
+        "embedding": {
+            "provider": "local",
+            "local": {
+                "model_name": "BAAI/bge-small-zh-v1.5",
+            },
+        }
+    }
+    from doubase.embedding.local import LocalEmbedder
+    embedder = get_embedder(config)
+    assert isinstance(embedder, LocalEmbedder)
+    assert embedder._model_name == "BAAI/bge-small-zh-v1.5"
+
+
+def test_get_embedder_raises_for_unknown_provider():
+    config = {
+        "embedding": {
+            "provider": "unknown",
+        }
+    }
+    try:
+        get_embedder(config)
+        assert False, "应该抛出 ValueError"
+    except ValueError as e:
+        assert "unknown" in str(e).lower()
