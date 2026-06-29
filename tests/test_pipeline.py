@@ -75,3 +75,39 @@ def test_build_ask_prompt_empty_chunks():
     assert len(messages) == 2
     assert "未找到相关内容" in messages[1]["content"]
     assert "通用知识" in messages[0]["content"]
+
+
+from doubase.pipeline import estimate_analyze
+
+
+def test_estimate_analyze():
+    config = {
+        "llm": {
+            "provider": "deepseek",
+            "deepseek": {
+                "api_key": "test",
+                "model": "deepseek-chat",
+                "base_url": "https://test.com",
+            },
+        },
+        "embedding": {
+            "provider": "zhipu",
+            "zhipu": {
+                "api_key": "test",
+                "model": "embedding-2",
+                "base_url": "https://test.com",
+            },
+        },
+        "pricing": {
+            "deepseek": {"input_price": 1.0, "output_price": 2.0},
+            "zhipu": {"embed_price": 0.5},
+        },
+        "chunker": {"chunk_size": 512, "chunk_overlap": 64},
+    }
+    est = estimate_analyze(
+        "tests/test_analyzer/fixtures/mini_project", config
+    )
+    assert est["total_files"] >= 2
+    assert est["total_llm_input"] > 0
+    assert est["total_llm_output"] > 0
+    assert est["total_cost"] > 0

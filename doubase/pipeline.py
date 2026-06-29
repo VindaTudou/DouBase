@@ -9,6 +9,7 @@ from doubase.embedding import get_embedder
 from doubase.storage.vector_store import VectorStore
 from doubase.retrieval.retriever import Retriever
 from doubase.generation import get_llm
+from doubase.analyzer.scanner import scan_project
 
 from rich.console import Console
 from rich.table import Table
@@ -346,3 +347,222 @@ def run_ask(
     except Exception as e:
         console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
         console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
+
+
+def estimate_analyze(project_dir: str, config: dict, focus: str = None) -> dict:
+    """估算项目分析的费用（不调用任何付费 API）。"""
+    files = scan_project(project_dir, focus=focus)
+    llm_provider = config["llm"]["provider"]
+    pricing = config.get("pricing", {}).get(llm_provider, {})
+    input_price = pricing.get("input_price", 1.0)
+    output_price = pricing.get("output_price", 2.0)
+    embed_price = (
+        config.get("pricing", {}).get("zhipu", {}).get("embed_price", 0.5)
+    )
+
+    chunker = Chunker(config.get("chunker", {}))
+    total_llm_input = 0
+    total_llm_output = 0
+    file_estimates = []
+
+    for f in files:
+        code_tokens = len(chunker._encode(f["content"]))
+        input_tokens = 200 + code_tokens
+        output_tokens = int(input_tokens * 0.3)
+        total_llm_input += input_tokens
+        total_llm_output += output_tokens
+        file_estimates.append({
+            "path": f["path"],
+            "size_kb": round(len(f["content"]) / 1024, 1),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        })
+
+    synthesis_input = total_llm_output + 2000
+    synthesis_output = 2000
+    total_llm_input += synthesis_input
+    total_llm_output += synthesis_output
+
+    llm_cost = (
+        total_llm_input * input_price + total_llm_output * output_price
+    ) / 1_000_000
+
+    total_embed_tokens = total_llm_output
+    embed_cost = total_embed_tokens / 1_000_000 * embed_price
+
+    return {
+        "project_dir": project_dir,
+        "project_name": Path(project_dir).name,
+        "total_files": len(file_estimates),
+        "scanned_total": len(files),
+        "file_estimates": file_estimates,
+        "total_llm_input": total_llm_input,
+        "total_llm_output": total_llm_output,
+        "llm_cost": llm_cost,
+        "total_embed_tokens": total_embed_tokens,
+        "embed_cost": embed_cost,
+        "total_cost": llm_cost + embed_cost,
+        "llm_provider": llm_provider,
+        "llm_model": config["llm"][llm_provider]["model"],
+        "embedding_provider": config["embedding"]["provider"],
+    }
+
+
+def display_analyze_estimate(estimate: dict):
+    """展示 analyze 费用估算表格。"""
+    console.print()
+    console.print("[bold]═══ Analyze 预算估算 ═══[/bold]")
+    console.print(f"项目: {estimate['project_name']}")
+    console.print(
+        f"源码文件: {estimate['scanned_total']} 个 -> "
+        f"重要性排序后选取 {estimate['total_files']} 个"
+    )
+    console.print(
+        f"LLM: {estimate['llm_provider']} ({estimate['llm_model']}) | "
+        f"Embedding: {estimate['embedding_provider']}"
+    )
+
+    console.print("\n[bold]—— LLM 分析花费 ——[/bold]")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("文件", style="dim")
+    table.add_column("代码量", justify="right")
+    table.add_column("预估输入", justify="right")
+    table.add_column("预估输出", justify="right")
+    table.add_column("费用", justify="right")
+
+    total_file_tokens = sum(
+        fe["input_tokens"] + fe["output_tokens"]
+        for fe in estimate["file_estimates"]
+    )
+    for fe in estimate["file_estimates"][:20]:
+        proportion = (fe["input_tokens"] + fe["output_tokens"]) / max(1, total_file_tokens)
+        file_cost = estimate["llm_cost"] * proportion * 0.85
+        table.add_row(
+            fe["path"][-50:],
+            f"{fe['size_kb']} KB",
+            f"{fe['input_tokens']:,} tk",
+            f"{fe['output_tokens']:,} tk",
+            f"¥{file_cost:.4f}",
+        )
+
+    if len(estimate["file_estimates"]) > 20:
+        table.add_row("...", "...", "...", "...", "...")
+
+    table.add_section()
+    table.add_row(
+        "[bold]LLM 小计[/bold]",
+        "-",
+        f"[bold]{estimate['total_llm_input']:,} tk[/bold]",
+        f"[bold]{estimate['total_llm_output']:,} tk[/bold]",
+        f"[bold]¥{estimate['llm_cost']:.4f}[/bold]",
+    )
+    console.print(table)
+
+    console.print(f"\n[bold]—— Embedding 入库花费 ——[/bold]")
+    console.print(
+        f"生成 .md 总结 -> 约 {estimate['total_embed_tokens']:,} tokens -> "
+        f"¥{estimate['embed_cost']:.4f}"
+    )
+
+    total = estimate['total_cost']
+    console.print(
+        f"\n[bold green]💰 总花费预估: ¥{total:.4f} "
+        f"(LLM ¥{estimate['llm_cost']:.4f} + Embedding ¥{estimate['embed_cost']:.4f})"
+        f"[/bold green]"
+    )
+
+
+def run_analyze(
+    project_dir: str,
+    config: dict,
+    focus: str = None,
+    skip_confirm: bool = False,
+):
+    """运行完整的 analyze 流水线：扫描 -> 分析 -> 写入 -> 入库。
+
+    Args:
+        project_dir: 待分析项目路径。
+        config: 完整配置字典。
+        focus: 可选的优先子目录。
+        skip_confirm: True 时跳过确认提示。
+    """
+    from doubase.analyzer.analyzer import analyze_file, synthesize_overview
+    from doubase.analyzer.writer import write_summary, write_overview
+
+    # 阶段 1: 估算
+    estimate = estimate_analyze(project_dir, config, focus)
+    display_analyze_estimate(estimate)
+
+    # 阶段 2: 确认
+    if not skip_confirm:
+        try:
+            answer = input("\n是否继续? [Y/n] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[yellow]已取消[/yellow]")
+            return
+        if answer and answer not in ("y", "yes"):
+            console.print("[yellow]已取消[/yellow]")
+            return
+
+    # 阶段 3: 执行
+    project_name = Path(project_dir).expanduser().resolve().name
+    output_dir = str(
+        Path(project_dir).expanduser().resolve().parent / "doubase_summaries"
+    )
+    project_source = str(Path(project_dir).expanduser().resolve())
+
+    files = scan_project(project_dir, focus=focus)
+    llm = get_llm(config)
+
+    console.print(f"\n[bold]分析 {len(files)} 个文件...[/bold]")
+
+    file_analyses = []
+    success_count = 0
+    fail_count = 0
+
+    for i, f in enumerate(files, 1):
+        console.print(f"  [{i}/{len(files)}] {f['path'][-60:]}")
+        try:
+            analysis = analyze_file(
+                llm, f["path"], f["content"], f["language"]
+            )
+            write_summary(
+                output_dir, project_name, project_source,
+                f["path"], f["language"], analysis,
+            )
+            file_analyses.append({"file": f["path"], "analysis": analysis})
+            success_count += 1
+        except Exception as e:
+            console.print(f"    [red]❌ 失败: {e}[/red]")
+            fail_count += 1
+            continue
+
+    # 综述
+    console.print(f"\n[bold]生成项目综述...[/bold]")
+    try:
+        overview = synthesize_overview(llm, project_name, file_analyses)
+        overview_path = write_overview(
+            output_dir, project_name, project_source, overview
+        )
+        console.print(f"  ✅ 综述已保存: {overview_path}")
+    except Exception as e:
+        console.print(f"  [red]❌ 综述生成失败: {e}[/red]")
+
+    # 将分析结果入库
+    console.print(f"\n[bold]将分析结果导入知识库...[/bold]")
+    summary_dir = Path(output_dir) / project_name
+    if summary_dir.exists():
+        summary_files = list(summary_dir.glob("*.md"))
+        if summary_files:
+            try:
+                run_ingest(
+                    [str(s) for s in summary_files], config, skip_confirm=True
+                )
+            except Exception as e:
+                console.print(f"  [red]❌ 导入失败: {e}[/red]")
+
+    console.print(f"\n[bold]doubase analyze 结果:[/bold]")
+    console.print(f"  ✅ 分析成功: {success_count} 个文件")
+    if fail_count:
+        console.print(f"  ❌ 分析失败: {fail_count} 个文件")
+    console.print(f"  📁 总结文件: {output_dir}/{project_name}/")
