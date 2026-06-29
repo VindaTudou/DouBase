@@ -1,55 +1,62 @@
-# LLM 配置
+# ┌──────────────────────────────────────┐
+# │  DouBase 配置文件                     │
+# │                                      │
+# │  敏感信息和模型选择请在 .env 中设置    │
+# │  运行时参数直接在此文件修改            │
+# └──────────────────────────────────────┘
+
+# LLM 配置 — API Key、模型名从 .env / 环境变量读取
 llm:
-  provider: deepseek
+  provider: ${DOUBASE_LLM_PROVIDER}
   deepseek:
-    api_key: ${DEEPSEEK_API_KEY}
-    model: deepseek-v4-flash
-    base_url: https://api.deepseek.com
+    api_key: ${DOUBASE_DEEPSEEK_API_KEY}
+    model: ${DOUBASE_DEEPSEEK_MODEL:-deepseek-chat}
+    base_url: ${DOUBASE_DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
   openai:
-    api_key: ${OPENAI_API_KEY}
-    model: gpt-4o
-    base_url: https://api.openai.com/v1
+    api_key: ${DOUBASE_OPENAI_API_KEY}
+    model: ${DOUBASE_OPENAI_MODEL:-gpt-4o}
+    base_url: ${DOUBASE_OPENAI_BASE_URL:-https://api.openai.com/v1}
   openai_compat:
-    api_key: ${CUSTOM_API_KEY}
-    model: your-model
-    base_url: https://your-api.com/v1
+    api_key: ${DOUBASE_CUSTOM_API_KEY}
+    model: ${DOUBASE_CUSTOM_MODEL:-your-model}
+    base_url: ${DOUBASE_CUSTOM_BASE_URL:-https://your-api.com/v1}
 
-# Embedding 配置
+# Embedding 配置 — API Key、模型名从 .env / 环境变量读取
 embedding:
-  provider: zhipu
+  provider: ${DOUBASE_EMBEDDING_PROVIDER:-zhipu}
   zhipu:
-    api_key: ${ZHIPU_API_KEY}
-    model: embedding-3
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    api_key: ${DOUBASE_ZHIPU_API_KEY}
+    model: ${DOUBASE_ZHIPU_MODEL:-embedding-2}
+    base_url: ${DOUBASE_ZHIPU_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
   local:
-    model_name: BAAI/bge-small-zh-v1.5
+    model_name: ${DOUBASE_LOCAL_MODEL_NAME:-BAAI/bge-small-zh-v1.5}
 
-# ChromaDB 配置
+# ChromaDB 存储路径
 storage:
-  persist_dir: ~/.doubase/vectors
-  collection_name: notes
+  persist_dir: ${DOUBASE_VECTOR_DIR:-~/.doubase/vectors}
+  collection_name: ${DOUBASE_COLLECTION_NAME:-notes}
 
-# 分块配置
+# 分块参数 (数值型，直接配置)
 chunker:
   chunk_size: 512
   chunk_overlap: 64
 
-# 检索配置
+# 检索参数
 retrieval:
   top_k: 5
 
-# 监控目录配置
+# 监控目录
 watch:
-  inbox_dir: ~/Documents/inbox
+  inbox_dir: ${DOUBASE_INBOX_DIR:-~/Documents/inbox}
 
-# 解析器配置
+# 启用的解析器
 parsers:
   enabled:
     - markdown
     - docx
     - pdf
 
-# API 定价（人民币/百万 tokens，用于费用估算）
+# API 定价 (人民币/百万 tokens，用于费用估算)
 pricing:
   deepseek:
     input_price: 1.0

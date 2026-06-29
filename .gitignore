@@ -9,3 +9,10 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
+
+# Environment (contains API keys)
+.env
+
+# IDE
+.idea/
+.superpowers/

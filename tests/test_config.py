@@ -48,6 +48,28 @@ def test_load_config_from_file():
         os.unlink(f.name)
 
 
+def test_env_var_with_default_when_missing():
+    """${VAR:-default} — 变量缺失时使用默认值"""
+    config = {"model": "${MISSING_VAR_999:-gpt-4o}"}
+    result = resolve_env_vars(config)
+    assert result["model"] == "gpt-4o"
+
+
+def test_env_var_with_default_when_set():
+    """${VAR:-default} — 变量存在时使用变量值"""
+    old = os.environ.get("TEST_DEFAULT_VAR")
+    try:
+        os.environ["TEST_DEFAULT_VAR"] = "deepseek-chat"
+        config = {"model": "${TEST_DEFAULT_VAR:-gpt-4o}"}
+        result = resolve_env_vars(config)
+        assert result["model"] == "deepseek-chat"
+    finally:
+        if old is None:
+            os.environ.pop("TEST_DEFAULT_VAR", None)
+        else:
+            os.environ["TEST_DEFAULT_VAR"] = old
+
+
 def test_load_config_defaults_to_project_root():
     config = load_config()
     assert "llm" in config
