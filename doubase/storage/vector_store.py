@@ -1,6 +1,7 @@
 """ChromaDB 向量存储 — 将 ChromaDB collection 封装为我们的 chunk 模型。"""
 
 from pathlib import Path
+from typing import Optional
 
 from doubase.chunker.chunker import Chunk
 
@@ -87,7 +88,7 @@ class VectorStore:
             return len(existing["ids"])
         return 0
 
-    def get_existing_hash(self, source_path: str) -> str | None:
+    def get_existing_hash(self, source_path: str) -> Optional[str]:
         """查询已索引文件的 content_hash，未找到则返回 None。"""
         existing = self._collection.get(
             where={"source_path": source_path},

@@ -2,9 +2,34 @@
 
 import argparse
 import sys
+from pathlib import Path
 
-from doubase.config import load_config
-from doubase.pipeline import run_ingest, run_ask, run_analyze
+# Python 版本检查
+if sys.version_info < (3, 10):
+    print(
+        f"❌ DouBase 需要 Python >= 3.11，当前版本: {sys.version}"
+        f"\n   请使用: /opt/homebrew/bin/python3.11 doubase/cli.py"
+        f"\n   或通过 pip install -e . 安装后使用 doubase 命令",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# 确保项目根目录在 sys.path 中，支持直接运行 python doubase/cli.py
+_sys_path_inserted = Path(__file__).resolve().parent.parent
+if str(_sys_path_inserted) not in sys.path:
+    sys.path.insert(0, str(_sys_path_inserted))
+
+try:
+    from doubase.config import load_config
+    from doubase.pipeline import run_ingest, run_ask, run_analyze
+except ImportError as e:
+    print(
+        f"❌ 导入失败: {e}\n"
+        f"   请确保已安装依赖: pip install -e .\n"
+        f"   或使用正确的 Python 版本 (>= 3.11)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def main():

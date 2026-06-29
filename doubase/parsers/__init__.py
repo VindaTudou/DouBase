@@ -1,5 +1,7 @@
 """文档解析器 — 支持 .md, .docx, .pdf 文件。"""
 
+from typing import Optional
+
 from doubase.parsers.base import BaseParser, ParsedDocument
 from doubase.parsers.markdown import MarkdownParser
 from doubase.parsers.docx import DocxParser
@@ -13,7 +15,7 @@ def get_all_parsers() -> list[BaseParser]:
     return [MarkdownParser(), DocxParser(), PdfParser()]
 
 
-def get_parser(file_path: str) -> BaseParser | None:
+def get_parser(file_path: str) -> Optional[BaseParser]:
     """根据文件扩展名返回合适的解析器，不支持则返回 None。"""
     for parser in get_all_parsers():
         if parser.supports(file_path):
