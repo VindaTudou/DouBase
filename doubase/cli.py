@@ -74,6 +74,9 @@ def main():
     # --- repl ---
     repl_parser = subparsers.add_parser("repl", help="进入交互式对话模式")
 
+    # --- voice ---
+    voice_parser = subparsers.add_parser("voice", help="语音输入模式（快捷键触发）")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -129,6 +132,10 @@ def main():
         elif args.command == "repl":
             from doubase.repl import start_repl
             start_repl()
+
+        elif args.command == "voice":
+            from doubase.voice import start_voice
+            start_voice()
     except ValueError as e:
         print(f"❌ 配置错误: {e}", file=sys.stderr)
         sys.exit(1)
