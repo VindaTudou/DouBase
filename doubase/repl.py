@@ -2,7 +2,6 @@
 
 import shlex
 import sys
-import threading
 import time
 
 from rich.console import Console
@@ -15,7 +14,6 @@ from doubase.pipeline import run_ingest, run_ask, run_analyze
 console = Console(highlight=False)
 
 IDLE_HINT_INTERVAL = 30
-SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 HELP_TEXT = """[bold]可用命令:[/bold]
   直接输入问题即可向知识库提问
@@ -32,53 +30,32 @@ PROMPT = "[bold green]\n›[/bold green] "
 
 
 class RunningIndicator:
-    """后台运行动画 — TTY 下显示旋转动画，管道模式下显示静态文本。
-
-    支持动态切换标签文本（change_label）。
-    """
+    """运行中指示器 — 使用 Rich 内置 Status，兼容 TTY 和管道模式。"""
 
     def __init__(self, label: str = "处理中"):
         self._label = label
-        self._running = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._status = None
         self._is_tty = sys.stdout.isatty()
-        self._lock = threading.Lock()
 
     def start(self):
-        self._running.set()
         if self._is_tty:
-            console.print()
-            self._thread = threading.Thread(target=self._animate, daemon=True)
-            self._thread.start()
+            self._status = console.status(
+                f"[bold]{self._label}...[/bold]", spinner="dots"
+            )
+            self._status.start()
         else:
             console.print(f"[dim]⏳ {self._label}...[/dim]")
 
     def change_label(self, new_label: str):
-        """运行中切换标签文本。"""
-        with self._lock:
-            self._label = new_label
-        if not self._is_tty:
+        self._label = new_label
+        if self._status is not None:
+            self._status.update(f"[bold]{self._label}...[/bold]")
+        else:
             console.print(f"[dim]⏳ {self._label}...[/dim]")
 
     def stop(self):
-        self._running.clear()
-        if self._thread is not None:
-            self._thread.join(timeout=0.5)
-        if self._is_tty:
-            sys.stdout.write("\r\033[K\n")
-            sys.stdout.flush()
-
-    def _animate(self):
-        i = 0
-        while self._running.is_set():
-            with self._lock:
-                label = self._label
-            frame = SPINNER_FRAMES[i % len(SPINNER_FRAMES)]
-            sys.stdout.write(f"\r\033[K  {frame} {label}...")
-            sys.stdout.flush()
-            i += 1
-            time.sleep(0.08)
-        # stop() 负责最终清理
+        if self._status is not None:
+            self._status.stop()
 
 
 def _make_welcome() -> Panel:
@@ -223,11 +200,11 @@ def start_repl(config_path: str = None):
                     on_before_stream=spinner.stop,
                 )
             except ValueError as e:
+                spinner.stop()
                 console.print(f"[red]❌ {e}[/red]")
             except Exception as e:
-                console.print(f"[red]❌ 出错了: {e}[/red]")
-            finally:
                 spinner.stop()
+                console.print(f"[red]❌ 出错了: {e}[/red]")
         else:
             try:
                 keep_running = _handle_command(cmd, content, config)
