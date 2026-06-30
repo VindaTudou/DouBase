@@ -1,6 +1,6 @@
 """基于 token 计数的滑动窗口文本分块器。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -12,12 +12,14 @@ class Chunk:
         source_path: 原始文件的绝对路径。
         chunk_index: 文档内的从零开始的索引。
         content_hash: 源文件内容的 SHA256 哈希（用于去重）。
+        metadata: 分块元数据（heading_path, heading_text, strategy 等）。
     """
 
     text: str
     source_path: str
     chunk_index: int
     content_hash: str
+    metadata: dict = field(default_factory=dict)
 
 
 class Chunker:
