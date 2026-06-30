@@ -2,6 +2,7 @@
 
 import shlex
 import sys
+import threading
 import time
 
 from rich.console import Console
@@ -13,7 +14,8 @@ from doubase.pipeline import run_ingest, run_ask, run_analyze
 
 console = Console(highlight=False)
 
-IDLE_HINT_INTERVAL = 30  # 闲置多少秒后显示提示
+IDLE_HINT_INTERVAL = 30
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 HELP_TEXT = """[bold]可用命令:[/bold]
   直接输入问题即可向知识库提问
@@ -29,8 +31,45 @@ HINT_TEXT = "[dim]💡 直接输入问题即可提问 | /ingest 导入 | /analyz
 PROMPT = "[bold green]\n›[/bold green] "
 
 
+class RunningIndicator:
+    """后台运行动画 — TTY 下显示旋转动画，管道模式下显示静态文本。"""
+
+    def __init__(self, label: str = "处理中"):
+        self._label = label
+        self._running = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._is_tty = sys.stdout.isatty()
+
+    def start(self):
+        self._running.set()
+        if self._is_tty:
+            console.print()
+            self._thread = threading.Thread(target=self._animate, daemon=True)
+            self._thread.start()
+        else:
+            console.print(f"[dim]⏳ {self._label}...[/dim]")
+
+    def stop(self):
+        self._running.clear()
+        if self._thread is not None:
+            self._thread.join(timeout=0.5)
+        if self._is_tty:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+
+    def _animate(self):
+        i = 0
+        while self._running.is_set():
+            frame = SPINNER_FRAMES[i % len(SPINNER_FRAMES)]
+            sys.stdout.write(f"\r\033[K  {frame} {self._label}...")
+            sys.stdout.flush()
+            i += 1
+            time.sleep(0.08)
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+
 def _make_welcome() -> Panel:
-    """构建欢迎面板（Rich 自动处理中文/emoji 对齐）。"""
     content = Text.from_markup(
         "直接输入问题，或用 [cyan]/[/cyan] 命令操作\n"
         "输入 [cyan]/help[/cyan] 查看可用命令"
@@ -49,7 +88,6 @@ def _touch_activity():
 
 
 def _check_idle_hint():
-    """两次输入之间闲置超时则显示提示（不干扰用户打字）。"""
     global _hint_shown
     if not _hint_shown and time.time() - _last_input_time >= IDLE_HINT_INTERVAL:
         _hint_shown = True
@@ -57,7 +95,6 @@ def _check_idle_hint():
 
 
 def _parse_command(text: str) -> tuple[str | None, str]:
-    """返回 (command, args_string)。command 为 None 表示纯文本提问。"""
     text = text.strip()
     if not text:
         return None, ""
@@ -97,7 +134,12 @@ def _handle_command(cmd: str, args: str, config: dict) -> bool:
             from doubase.watch import run_watch
             run_watch(config)
         else:
-            run_ingest(paths=paths, config=config, skip_confirm=skip_confirm)
+            spinner = RunningIndicator("正在导入文档")
+            spinner.start()
+            try:
+                run_ingest(paths=paths, config=config, skip_confirm=skip_confirm)
+            finally:
+                spinner.stop()
 
     elif cmd == "analyze":
         if not args:
@@ -116,7 +158,12 @@ def _handle_command(cmd: str, args: str, config: dict) -> bool:
                 focus_idx = i + 1
                 break
         focus = parse_args[focus_idx] if focus_idx else None
-        run_analyze(project_dir=project, config=config, focus=focus, skip_confirm=skip_confirm)
+        spinner = RunningIndicator("正在分析代码项目")
+        spinner.start()
+        try:
+            run_analyze(project_dir=project, config=config, focus=focus, skip_confirm=skip_confirm)
+        finally:
+            spinner.stop()
 
     else:
         console.print(f"[yellow]未知命令: /{cmd}。输入 /help 查看可用命令。[/yellow]")
@@ -133,12 +180,9 @@ def start_repl(config_path: str = None):
         sys.exit(1)
 
     _touch_activity()
-
-    # 欢迎界面
     console.print(_make_welcome())
 
     while True:
-        # 两次输入之间检查闲置提示
         _check_idle_hint()
 
         try:
@@ -158,12 +202,16 @@ def start_repl(config_path: str = None):
         if cmd is None:
             if not content:
                 continue
+            spinner = RunningIndicator("正在思考")
+            spinner.start()
             try:
                 run_ask(question=content, config=config, render_markdown=True)
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
             except Exception as e:
                 console.print(f"[red]❌ 出错了: {e}[/red]")
+            finally:
+                spinner.stop()
         else:
             try:
                 keep_running = _handle_command(cmd, content, config)
