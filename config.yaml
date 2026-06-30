@@ -43,7 +43,7 @@ chunker:
 
 # 检索参数
 retrieval:
-  top_k: 5
+  top_k: 15
 
 # 监控目录
 watch:

@@ -16,3 +16,6 @@ venv/
 # IDE
 .idea/
 .superpowers/
+
+# Claude Code
+CLAUDE.md
