@@ -79,3 +79,69 @@ class Chunker:
                 ))
 
         return chunks
+
+
+def chunk_by_headings(
+    text: str,
+    source_path: str,
+    content_hash: str,
+    chunker: "Chunker",
+) -> list[Chunk]:
+    """Stage 1+2: 按 # 标题切分 -> 长段落滑动窗口兜底。
+
+    仅对 .md 文件调用此函数。.docx/.pdf 继续使用 chunker.chunk_text()。
+    """
+    from doubase.chunker.heading_splitter import split_by_headings
+
+    sections = split_by_headings(text)
+    all_chunks = []
+
+    for section in sections:
+        tokens = chunker._encode(section.body_text)
+        if len(tokens) <= chunker.chunk_size:
+            # 短段落 -> 单个 chunk
+            all_chunks.append(Chunk(
+                text=section.body_text,
+                source_path=source_path,
+                chunk_index=0,  # 后续全局编号修正
+                content_hash=content_hash,
+                metadata={
+                    "heading_path": section.heading_path,
+                    "heading_text": section.heading_text,
+                    "strategy": "heading",
+                },
+            ))
+        else:
+            # 长段落 -> 滑动窗口切分
+            sub_text = section.body_text
+            sub_tokens = chunker._encode(sub_text)
+            step = max(1, chunker.chunk_size - chunker.chunk_overlap)
+
+            for i in range(0, len(sub_tokens), step):
+                chunk_token_ids = sub_tokens[i:i + chunker.chunk_size]
+                if chunker._encoding is not None:
+                    chunk_text = chunker._decode(chunk_token_ids)
+                else:
+                    char_ratio = len(sub_text) / max(1, len(sub_tokens))
+                    start_char = int(i * char_ratio)
+                    end_char = int((i + chunker.chunk_size) * char_ratio)
+                    chunk_text = sub_text[start_char:end_char]
+
+                if chunk_text.strip():
+                    all_chunks.append(Chunk(
+                        text=chunk_text.strip(),
+                        source_path=source_path,
+                        chunk_index=0,  # 后续全局编号修正
+                        content_hash=content_hash,
+                        metadata={
+                            "heading_path": section.heading_path,
+                            "heading_text": section.heading_text,
+                            "strategy": "sliding_window",
+                        },
+                    ))
+
+    # 全局编号
+    for i, c in enumerate(all_chunks):
+        c.chunk_index = i
+
+    return all_chunks

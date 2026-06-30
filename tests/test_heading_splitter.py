@@ -78,3 +78,39 @@ def test_start_line_tracking():
     sections = split_by_headings(text)
     titles = {s.heading_text: s.start_line for s in sections if s.heading_text}
     assert titles.get("Title") == 1
+
+
+from doubase.chunker.chunker import Chunker, chunk_by_headings
+
+
+def test_chunk_by_headings_short_sections():
+    """短段落 -> 每个标题一个 chunk"""
+    chunker = Chunker({"chunk_size": 512, "chunk_overlap": 64})
+    text = "# Title\nShort body.\n\n## Sub\nAlso short."
+    chunks = chunk_by_headings(text, "/tmp/test.md", "hash123", chunker)
+    assert len(chunks) == 2
+    assert chunks[0].metadata["strategy"] == "heading"
+    assert chunks[0].metadata["heading_text"] == "Title"
+    assert chunks[0].metadata["heading_path"] == ["Title"]
+    assert chunks[1].metadata["heading_text"] == "Sub"
+    assert chunks[1].metadata["heading_path"] == ["Title", "Sub"]
+
+
+def test_chunk_by_headings_long_section_falls_back_to_sliding_window():
+    """长段落 -> 滑动窗口兜底"""
+    chunker = Chunker({"chunk_size": 20, "chunk_overlap": 5})
+    text = "# Test\n" + "word " * 100
+    chunks = chunk_by_headings(text, "/tmp/test.md", "hash456", chunker)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert c.metadata["strategy"] in ("heading", "sliding_window")
+        assert c.metadata["heading_text"] == "Test"
+
+
+def test_chunk_by_headings_global_index():
+    """全局 chunk_index 连续编号"""
+    chunker = Chunker({"chunk_size": 20, "chunk_overlap": 5})
+    text = "# A\nshort\n\n# B\n" + "word " * 100
+    chunks = chunk_by_headings(text, "/tmp/test.md", "hash789", chunker)
+    assert chunks[0].chunk_index == 0
+    assert chunks[-1].chunk_index == len(chunks) - 1
