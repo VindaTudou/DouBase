@@ -333,6 +333,7 @@ def run_ask(
     llm_override: str = None,
     embedding_override: str = None,
     render_markdown: bool = False,
+    on_before_stream=None,
 ):
     """运行 RAG 问答流水线：检索 + 生成回答。
 
@@ -342,6 +343,7 @@ def run_ask(
         llm_override: 覆盖 LLM provider（如 "openai"）。
         embedding_override: 覆盖 embedding provider（如 "local"）。
         render_markdown: True 时累积全文后用 Rich Markdown 渲染（REPL 模式）。
+        on_before_stream: 开始输出回答前调用的回调（无参数）。用于停止 spinner。
     """
     top_k = config.get("retrieval", {}).get("top_k", 5)
 
@@ -383,7 +385,10 @@ def run_ask(
     # 构建提示词
     messages = _build_ask_prompt(question, chunks)
 
-    # 输出回答
+    # 输出回答：先通知外部 spinner 可以停了
+    if on_before_stream:
+        on_before_stream()
+
     if render_markdown:
         # REPL 模式：累积全文后用 Rich Markdown 渲染
         full_text = ""

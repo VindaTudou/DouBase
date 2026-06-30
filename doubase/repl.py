@@ -54,7 +54,7 @@ class RunningIndicator:
         if self._thread is not None:
             self._thread.join(timeout=0.5)
         if self._is_tty:
-            sys.stdout.write("\r\033[K")
+            sys.stdout.write("\r\033[K\n")
             sys.stdout.flush()
 
     def _animate(self):
@@ -65,8 +65,7 @@ class RunningIndicator:
             sys.stdout.flush()
             i += 1
             time.sleep(0.08)
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
+        # 线程结束时不输出任何内容（stop() 负责最终清理）
 
 
 def _make_welcome() -> Panel:
@@ -205,7 +204,8 @@ def start_repl(config_path: str = None):
             spinner = RunningIndicator("正在思考")
             spinner.start()
             try:
-                run_ask(question=content, config=config, render_markdown=True)
+                run_ask(question=content, config=config, render_markdown=True,
+                        on_before_stream=spinner.stop)
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
             except Exception as e:
