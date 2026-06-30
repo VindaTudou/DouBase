@@ -32,13 +32,17 @@ PROMPT = "[bold green]\n›[/bold green] "
 
 
 class RunningIndicator:
-    """后台运行动画 — TTY 下显示旋转动画，管道模式下显示静态文本。"""
+    """后台运行动画 — TTY 下显示旋转动画，管道模式下显示静态文本。
+
+    支持动态切换标签文本（change_label）。
+    """
 
     def __init__(self, label: str = "处理中"):
         self._label = label
         self._running = threading.Event()
         self._thread: threading.Thread | None = None
         self._is_tty = sys.stdout.isatty()
+        self._lock = threading.Lock()
 
     def start(self):
         self._running.set()
@@ -47,6 +51,13 @@ class RunningIndicator:
             self._thread = threading.Thread(target=self._animate, daemon=True)
             self._thread.start()
         else:
+            console.print(f"[dim]⏳ {self._label}...[/dim]")
+
+    def change_label(self, new_label: str):
+        """运行中切换标签文本。"""
+        with self._lock:
+            self._label = new_label
+        if not self._is_tty:
             console.print(f"[dim]⏳ {self._label}...[/dim]")
 
     def stop(self):
@@ -60,12 +71,14 @@ class RunningIndicator:
     def _animate(self):
         i = 0
         while self._running.is_set():
+            with self._lock:
+                label = self._label
             frame = SPINNER_FRAMES[i % len(SPINNER_FRAMES)]
-            sys.stdout.write(f"\r\033[K  {frame} {self._label}...")
+            sys.stdout.write(f"\r\033[K  {frame} {label}...")
             sys.stdout.flush()
             i += 1
             time.sleep(0.08)
-        # 线程结束时不输出任何内容（stop() 负责最终清理）
+        # stop() 负责最终清理
 
 
 def _make_welcome() -> Panel:
@@ -201,11 +214,14 @@ def start_repl(config_path: str = None):
         if cmd is None:
             if not content:
                 continue
-            spinner = RunningIndicator("正在思考")
+            spinner = RunningIndicator("正在检索")
             spinner.start()
             try:
-                run_ask(question=content, config=config, render_markdown=True,
-                        on_before_stream=spinner.stop)
+                run_ask(
+                    question=content, config=config, render_markdown=True,
+                    on_retrieval_done=lambda: spinner.change_label("正在思考"),
+                    on_before_stream=spinner.stop,
+                )
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
             except Exception as e:
