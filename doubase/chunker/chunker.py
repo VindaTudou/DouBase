@@ -97,6 +97,8 @@ def chunk_by_headings(
     all_chunks = []
 
     for section in sections:
+        if not section.body_text or not section.body_text.strip():
+            continue  # 跳过空正文段落（如纯容器标题）
         tokens = chunker._encode(section.body_text)
         if len(tokens) <= chunker.chunk_size:
             # 短段落 -> 单个 chunk
