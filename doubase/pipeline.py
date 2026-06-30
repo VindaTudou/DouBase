@@ -289,6 +289,7 @@ def run_ask(
     config: dict,
     llm_override: str = None,
     embedding_override: str = None,
+    render_markdown: bool = False,
 ):
     """运行 RAG 问答流水线：检索 + 生成回答。
 
@@ -297,6 +298,7 @@ def run_ask(
         config: 完整配置字典。
         llm_override: 覆盖 LLM provider（如 "openai"）。
         embedding_override: 覆盖 embedding provider（如 "local"）。
+        render_markdown: True 时累积全文后用 Rich Markdown 渲染（REPL 模式）。
     """
     top_k = config.get("retrieval", {}).get("top_k", 5)
 
@@ -338,14 +340,38 @@ def run_ask(
     # 构建提示词
     messages = _build_ask_prompt(question, chunks)
 
-    # 流式输出回答
-    try:
-        for token in llm.chat_stream(messages):
-            console.print(token, end="", highlight=False)
-        console.print()
-    except Exception as e:
-        console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
-        console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
+    # 输出回答
+    if render_markdown:
+        # REPL 模式：累积全文后用 Rich Markdown 渲染
+        full_text = ""
+        try:
+            for token in llm.chat_stream(messages):
+                full_text += token
+        except Exception as e:
+            console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
+            console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
+            return
+        _display_markdown(full_text)
+    else:
+        # CLI 模式：流式逐 token 输出
+        try:
+            for token in llm.chat_stream(messages):
+                console.print(token, end="", highlight=False)
+            console.print()
+        except Exception as e:
+            console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
+            console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
+
+
+def _display_markdown(text: str):
+    """用 Rich 渲染 Markdown 文本到终端。"""
+    from rich.markdown import Markdown
+    from rich.text import Text
+
+    # 白色圆点 + Markdown 内容
+    console.print(Text("●", style="bold white"))
+    md = Markdown(text)
+    console.print(md)
 
 
 def estimate_analyze(project_dir: str, config: dict, focus: str = None) -> dict:

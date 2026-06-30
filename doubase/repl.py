@@ -159,8 +159,7 @@ def start_repl(config_path: str = None):
             if not content:
                 continue
             try:
-                console.print("[bold green]●[/bold green]")
-                run_ask(question=content, config=config)
+                run_ask(question=content, config=config, render_markdown=True)
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
             except Exception as e:
