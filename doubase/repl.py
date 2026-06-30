@@ -4,18 +4,14 @@ import shlex
 import sys
 import threading
 import time
-from pathlib import Path
 
 from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
 from rich.text import Text
-from rich.prompt import Prompt
 
 from doubase.config import load_config
 from doubase.pipeline import run_ingest, run_ask, run_analyze
 
-console = Console()
+console = Console(highlight=False)
 
 IDLE_HINT_INTERVAL = 30  # 闲置多少秒后显示提示
 
@@ -28,13 +24,18 @@ HELP_TEXT = """[bold]可用命令:[/bold]
   [cyan]/help[/cyan]              显示此帮助
   [cyan]/exit[/cyan]              退出"""
 
-WELCOME = rf"""
-╔══════════════════════════════════════════════╗
-║  🧠 [bold]DouBase REPL[/bold]                       ║
-║  直接输入问题，或用 [cyan]/[/cyan] 命令操作            ║
-║  输入 [cyan]/help[/cyan] 查看可用命令                ║
-╚══════════════════════════════════════════════╝
+HINT_TEXT = "[dim]💡 直接输入问题即可提问 | /ingest 导入 | /analyze 分析 | /help 帮助 | /exit 退出[/dim]"
+
+# 纯文本欢迎框，避免 Rich markup 导致边框对不齐
+WELCOME = """
+╔══════════════════════════════════════════╗
+║  🧠 DouBase REPL                        ║
+║  直接输入问题，或用 / 命令操作           ║
+║  输入 /help 查看可用命令                 ║
+╚══════════════════════════════════════════╝
 """
+
+PROMPT = "[bold green]\n›[/bold green] "
 
 
 class IdleHint:
@@ -44,7 +45,7 @@ class IdleHint:
         self._last_activity = time.time()
         self._hint_shown = False
         self._running = True
-        self._paused = False  # 流式输出时暂停提示
+        self._paused = False
         self._lock = threading.Lock()
 
     def touch(self):
@@ -53,12 +54,10 @@ class IdleHint:
             self._hint_shown = False
 
     def pause(self):
-        """暂停提示（流式输出期间调用）。"""
         with self._lock:
             self._paused = True
 
     def resume(self):
-        """恢复提示。"""
         with self._lock:
             self._paused = False
             self._last_activity = time.time()
@@ -77,9 +76,13 @@ class IdleHint:
             return False
 
 
+def _print_hint():
+    """打印闲置提示——写在 Prompt 的上方。"""
+    console.print(HINT_TEXT)
+
+
 def _parse_command(text: str) -> tuple[str | None, str]:
     """解析用户输入，返回 (command, args_string)。
-
     command 为 None 表示纯文本提问（走 ask）。
     以 / 开头的是命令。
     """
@@ -89,13 +92,12 @@ def _parse_command(text: str) -> tuple[str | None, str]:
 
     if text.startswith("/"):
         parts = shlex.split(text)
-        cmd = parts[0][1:]  # 去掉 /
-        # 重新构造 args 字符串（保留用户原始输入格式）
+        cmd = parts[0][1:]
         if len(parts) > 1:
             return cmd, text[len(cmd) + 2:].strip()
         return cmd, ""
     else:
-        return None, text  # 纯文本 → ask
+        return None, text
 
 
 def _handle_command(cmd: str, args: str, config: dict) -> bool:
@@ -160,13 +162,12 @@ def start_repl(config_path: str = None):
 
     idle_hint = IdleHint()
 
-    # 启动后台空闲提示线程
+    # 后台空闲提示线程
     def hint_loop():
         while idle_hint._running:
             time.sleep(1)
             if idle_hint.should_hint():
-                console.print()
-                console.print("[dim]💡 直接输入问题即可提问 | /ingest 导入 | /analyze 分析 | /help 帮助 | /exit 退出[/dim]")
+                _print_hint()
 
     hint_thread = threading.Thread(target=hint_loop, daemon=True)
     hint_thread.start()
@@ -176,7 +177,12 @@ def start_repl(config_path: str = None):
 
     while True:
         try:
-            user_input = Prompt.ask("\n[bold green]›[/bold green]")
+            console.print(PROMPT, end="")
+            sys.stdout.flush()
+            user_input = sys.stdin.readline()
+            if not user_input:  # EOF
+                raise EOFError
+            user_input = user_input.strip()
             idle_hint.touch()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]再见！[/dim]")
@@ -185,11 +191,12 @@ def start_repl(config_path: str = None):
         cmd, content = _parse_command(user_input)
 
         if cmd is None:
-            # 纯文本问题 → ask
             if not content:
                 continue
             idle_hint.pause()
             try:
+                # 绿色圆点提示这是 agent 的回答
+                console.print("[bold green]●[/bold green]")
                 run_ask(question=content, config=config)
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
@@ -198,7 +205,6 @@ def start_repl(config_path: str = None):
             finally:
                 idle_hint.resume()
         else:
-            # / 命令
             idle_hint.pause()
             try:
                 keep_running = _handle_command(cmd, content, config)

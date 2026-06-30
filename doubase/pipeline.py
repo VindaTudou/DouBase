@@ -339,7 +339,6 @@ def run_ask(
     messages = _build_ask_prompt(question, chunks)
 
     # 流式输出回答
-    console.print()
     try:
         for token in llm.chat_stream(messages):
             console.print(token, end="", highlight=False)
