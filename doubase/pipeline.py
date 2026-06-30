@@ -392,20 +392,22 @@ def run_ask(
     messages = _build_ask_prompt(question, chunks)
 
     if render_markdown:
-        # REPL 模式：用 Rich Live 增量流式渲染 Markdown
+        # REPL 模式: Live 流式纯文本 → 最后帧切换为 Markdown
         from rich.live import Live
         from rich.markdown import Markdown
+        from rich.text import Text
 
         if on_before_stream:
             on_before_stream()
 
-        accumulator = "● "  # 白色圆点在第一行前
-        md = Markdown("")
+        accumulator = ""
         try:
-            with Live(md, console=console, refresh_per_second=8) as live:
+            with Live(Text("●"), console=console, refresh_per_second=15) as live:
                 for token in llm.chat_stream(messages):
                     accumulator += token
-                    live.update(Markdown(accumulator))
+                    live.update(Text(f"● {accumulator}"))
+                # 最终帧切换为完整 Markdown 渲染（圆点放在 Markdown 内首行）
+                live.update(Markdown("● " + accumulator))
         except Exception as e:
             console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
             console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
