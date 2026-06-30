@@ -25,6 +25,14 @@ def test_collect_files_expands_directories():
 
 def test_estimate_ingest_with_markdown():
     config = {
+        "llm": {
+            "provider": "deepseek",
+            "deepseek": {
+                "api_key": "test",
+                "model": "deepseek-chat",
+                "base_url": "https://test.com",
+            },
+        },
         "chunker": {"chunk_size": 512, "chunk_overlap": 64},
         "embedding": {
             "provider": "zhipu",
@@ -34,7 +42,10 @@ def test_estimate_ingest_with_markdown():
                 "base_url": "https://test.com",
             },
         },
-        "pricing": {"zhipu": {"embed_price": 0.5}},
+        "pricing": {
+            "zhipu": {"embed_price": 0.5},
+            "deepseek": {"input_price": 1.0, "output_price": 2.0},
+        },
     }
     with tempfile.TemporaryDirectory() as tmpdir:
         md_file = Path(tmpdir, "test.md")

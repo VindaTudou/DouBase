@@ -4,7 +4,8 @@ import hashlib
 from pathlib import Path
 
 from doubase.parsers import get_parser
-from doubase.chunker.chunker import Chunker
+from doubase.chunker.chunker import Chunker, chunk_by_headings
+from doubase.chunker.semantic_merger import merge_semantically
 from doubase.embedding import get_embedder
 from doubase.storage.vector_store import VectorStore
 from doubase.retrieval.retriever import Retriever
@@ -71,7 +72,12 @@ def estimate_ingest(paths: list[str], config: dict) -> dict:
             continue
 
         content_hash = _hash_file(file_path)
-        chunks = chunker.chunk_text(doc.text, file_path, content_hash)
+        if doc.file_type == "markdown":
+            raw_chunks = chunk_by_headings(doc.text, file_path, content_hash, chunker)
+        else:
+            raw_chunks = chunker.chunk_text(doc.text, file_path, content_hash)
+
+        chunks = raw_chunks
 
         token_count = sum(len(chunker._encode(c.text)) for c in chunks)
 
@@ -86,6 +92,19 @@ def estimate_ingest(paths: list[str], config: dict) -> dict:
 
     total_cost = total_tokens / 1_000_000 * embed_price
 
+    # 估算 LLM 合并费用
+    merge_pairs = 0
+    llm_provider = config["llm"]["provider"]
+    llm_pricing = config.get("pricing", {}).get(llm_provider, {})
+    merge_input_price = llm_pricing.get("input_price", 1.0)
+    for file_stat in file_stats:
+        # 同标题下有多个 chunk 时才需要 LLM 判断
+        # 简化估算：每个文件有多少个 heading section 被拆分了
+        file_chunk_count = file_stat.get("chunks", 0)
+        if file_chunk_count > 1:
+            merge_pairs += file_chunk_count - 1
+    merge_cost = merge_pairs * 500 / 1_000_000 * merge_input_price  # ~500 tokens per merge pair
+
     return {
         "files": file_stats,
         "skipped": skipped_unsupported,
@@ -96,6 +115,8 @@ def estimate_ingest(paths: list[str], config: dict) -> dict:
         "embedding_model": config["embedding"].get(
             config["embedding"]["provider"], {}
         ).get("model", "unknown"),
+        "merge_pairs": merge_pairs,
+        "merge_cost": merge_cost,
     }
 
 
@@ -138,6 +159,12 @@ def display_ingest_estimate(estimate: dict):
             f"[bold]¥{estimate['total_cost']:.4f}[/bold]",
         )
         console.print(table)
+
+    if estimate.get("merge_pairs", 0) > 0:
+        console.print(
+            f"[dim]预估 LLM 语义合并: {estimate['merge_pairs']} 对, "
+            f"约 ¥{estimate['merge_cost']:.4f}[/dim]"
+        )
 
     if estimate["skipped"]:
         console.print(
@@ -212,8 +239,24 @@ def run_ingest(paths: list[str], config: dict, skip_confirm: bool = False):
             console.print(f"  ❌ 解析失败: {file_path} ({e})")
             continue
 
-        # 分块
-        chunks = chunker.chunk_text(doc.text, file_path, content_hash)
+        # 分块 — 根据文件类型选择策略
+        if doc.file_type == "markdown":
+            raw_chunks = chunk_by_headings(doc.text, file_path, content_hash, chunker)
+        else:
+            # .docx / .pdf 保持原有滑动窗口
+            raw_chunks = chunker.chunk_text(doc.text, file_path, content_hash)
+
+        # LLM 语义合并（Stage 3）
+        if config.get("chunker", {}).get("semantic_merge", True) and raw_chunks:
+            try:
+                llm = get_llm(config)
+                chunks = merge_semantically(raw_chunks, llm)
+            except Exception:
+                # LLM 合并失败 → 使用原始分块结果
+                chunks = raw_chunks
+        else:
+            chunks = raw_chunks
+
         if not chunks:
             results["skipped_unchanged"].append(file_path)
             console.print(f"  ⏭️  跳过 (空文件): {file_path}")
