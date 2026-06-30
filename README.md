@@ -5,6 +5,7 @@
 ## 功能
 
 - **RAG 问答** — 提问，结合本地笔记 + LLM 知识给出混合回答
+- **交互式 REPL** — 进入对话模式，直接输入问题即可提问，支持 `/` 命令
 - **文档导入** — 导入 `.md`、`.docx`、`.pdf` 文件到 ChromaDB 向量库
 - **代码分析** — 分析外部项目，自动生成 Markdown 总结并入库
 - **费用估算** — 在调用任何付费 API 前展示花费预估，确认后执行
@@ -81,6 +82,22 @@ doubase analyze ~/projects/some-repo/ --focus src/core/
 doubase analyze ~/projects/some-repo/ --yes
 ```
 
+### 6. 交互式对话（推荐）
+
+```bash
+doubase repl
+```
+
+进入对话模式后：
+- 直接输入问题即可提问
+- `/ingest <路径>`   导入文档到知识库
+- `/analyze <项目>`  分析代码项目
+- `/ingest --watch`  监控目录自动导入
+- `/help`            查看可用命令
+- `/exit`            退出
+
+闲置 30 秒自动显示命令提示。回答使用 Markdown 渲染（表格、列表、标题等）。
+
 ## 配置
 
 **API Key、模型选择、Provider 切换**全部在 `.env` 文件中管理：
@@ -132,6 +149,12 @@ chunker:
 ## 架构
 
 ```
+CLI 命令:
+  doubase ask <question>         单次 RAG 问答
+  doubase repl                   交互式对话（直接输入问题，/ 命令操作）
+  doubase ingest <paths>         导入文档
+  doubase analyze <project>      分析代码项目
+
 Ingest 流水线:   解析器 → 哈希去重 → 分块器 → Embedder → ChromaDB
 Ask 流水线:      查询 → Embed → 检索 top-K → 混合提示词 → LLM → 回答
 Analyze 流水线:  扫描器 → LLM 分析 → 写入器 (.md) → Ingest 流水线
