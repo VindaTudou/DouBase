@@ -30,7 +30,7 @@ PROMPT = "[bold green]\n›[/bold green] "
 
 
 class RunningIndicator:
-    """运行中指示器 — 使用 Rich 内置 Status，兼容 TTY 和管道模式。"""
+    """运行中指示器 — 使用 Rich 内置 Status。"""
 
     def __init__(self, label: str = "处理中"):
         self._label = label
@@ -43,13 +43,6 @@ class RunningIndicator:
                 f"[bold]{self._label}...[/bold]", spinner="dots"
             )
             self._status.start()
-        else:
-            console.print(f"[dim]⏳ {self._label}...[/dim]")
-
-    def change_label(self, new_label: str):
-        self._label = new_label
-        if self._status is not None:
-            self._status.update(f"[bold]{self._label}...[/bold]")
         else:
             console.print(f"[dim]⏳ {self._label}...[/dim]")
 
@@ -196,8 +189,7 @@ def start_repl(config_path: str = None):
             try:
                 run_ask(
                     question=content, config=config, render_markdown=True,
-                    on_retrieval_done=lambda: spinner.change_label("正在思考"),
-                    on_before_stream=spinner.stop,
+                    on_retrieval_done=spinner.stop,
                 )
             except ValueError as e:
                 spinner.stop()

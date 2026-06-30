@@ -392,19 +392,23 @@ def run_ask(
     messages = _build_ask_prompt(question, chunks)
 
     if render_markdown:
-        # REPL 模式：累积全文后用 Rich Markdown 渲染
-        full_text = ""
+        # REPL 模式：用 Rich Live 增量流式渲染 Markdown
+        from rich.live import Live
+        from rich.markdown import Markdown
+
+        if on_before_stream:
+            on_before_stream()
+
+        accumulator = "● "  # 白色圆点在第一行前
+        md = Markdown("")
         try:
-            for token in llm.chat_stream(messages):
-                full_text += token
+            with Live(md, console=console, refresh_per_second=8) as live:
+                for token in llm.chat_stream(messages):
+                    accumulator += token
+                    live.update(Markdown(accumulator))
         except Exception as e:
             console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
             console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
-            return
-        # Markdown 渲染前才通知外部 spinner 停止
-        if on_before_stream:
-            on_before_stream()
-        _display_markdown(full_text)
     else:
         # CLI 模式：流式逐 token 输出
         try:
@@ -415,17 +419,6 @@ def run_ask(
             console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
             console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
 
-
-def _display_markdown(text: str):
-    """用 Rich 渲染 Markdown 文本，白色圆点与内容同行对齐。"""
-    from rich.markdown import Markdown
-    from rich.table import Table
-
-    table = Table(show_header=False, box=None, padding=(0, 0), expand=True)
-    table.add_column(width=2, no_wrap=True)
-    table.add_column()
-    table.add_row("[bold white]●[/bold white] ", Markdown(text))
-    console.print(table)
 
 
 def estimate_analyze(project_dir: str, config: dict, focus: str = None) -> dict:
