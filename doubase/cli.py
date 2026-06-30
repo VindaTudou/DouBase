@@ -71,6 +71,9 @@ def main():
         "--yes", "-y", action="store_true", help="跳过确认提示"
     )
 
+    # --- repl ---
+    repl_parser = subparsers.add_parser("repl", help="进入交互式对话模式")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -83,6 +86,8 @@ def main():
         print("     doubase ingest ~/Documents/notes/")
         print("  3. 开始提问:")
         print('     doubase ask "你的问题"')
+        print("  4. 交互对话:")
+        print('     doubase repl')
         sys.exit(0)
 
     # 加载配置
@@ -120,6 +125,10 @@ def main():
                 focus=args.focus,
                 skip_confirm=args.yes,
             )
+
+        elif args.command == "repl":
+            from doubase.repl import start_repl
+            start_repl()
     except ValueError as e:
         print(f"❌ 配置错误: {e}", file=sys.stderr)
         sys.exit(1)
