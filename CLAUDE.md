@@ -34,6 +34,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **Ingest**: `doubase ingest <paths>` — 解析文档 → SHA256 哈希去重 → 分块 → Embedding → ChromaDB
 2. **Ask**: `doubase ask <question>` — 问题 Embedding → 检索 top-K → 混合 Prompt（本地笔记 + LLM 知识）→ 流式回答
 3. **Analyze**: `doubase analyze <project>` — 扫描源码 → LLM 逐文件分析 → 生成 Markdown 总结 → 自动触发 Ingest 入库
+4. **REPL**: `doubase repl` — 交互式对话模式，直接输入问题即可提问，`/` 前缀执行命令（`/ingest`、`/analyze`、`/help`、`/exit`）。闲置 30 秒自动显示命令提示。
+
+### REPL 输出模式
+
+`repl.py` 通过 `run_ask(render_markdown=True)` 累积 LLM 流式输出后，用 `rich.markdown.Markdown` 渲染完整回答（表格、列表、标题等）。回答前打印白色 `●` 圆点标识，使用 Rich `Table` 与内容同行对齐。
+
+CLI 模式（`doubase ask`）保持流式逐 token 输出，不渲染 Markdown。
 
 ### 关键抽象接口
 
