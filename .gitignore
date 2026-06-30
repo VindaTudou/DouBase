@@ -17,7 +17,5 @@ venv/
 .idea/
 .superpowers/
 
-# Claude Code
-CLAUDE.md
 
 interview/
