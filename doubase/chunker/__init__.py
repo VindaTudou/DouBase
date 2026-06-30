@@ -2,3 +2,4 @@
 
 from doubase.chunker.chunker import Chunk, Chunker, chunk_by_headings
 from doubase.chunker.heading_splitter import split_by_headings, HeadingSection
+from doubase.chunker.semantic_merger import merge_semantically
