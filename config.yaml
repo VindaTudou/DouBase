@@ -40,6 +40,8 @@ storage:
 chunker:
   chunk_size: 512
   chunk_overlap: 64
+  heading_split: true           # 启用 # 标题切分（仅 .md）
+  semantic_merge: true          # 启用 LLM 保守合并
 
 # 检索参数
 retrieval:
