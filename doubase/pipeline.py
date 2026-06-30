@@ -364,14 +364,15 @@ def run_ask(
 
 
 def _display_markdown(text: str):
-    """用 Rich 渲染 Markdown 文本到终端。"""
+    """用 Rich 渲染 Markdown 文本，白色圆点与内容同行对齐。"""
     from rich.markdown import Markdown
-    from rich.text import Text
+    from rich.table import Table
 
-    # 白色圆点 + Markdown 内容
-    console.print(Text("●", style="bold white"))
-    md = Markdown(text)
-    console.print(md)
+    table = Table(show_header=False, box=None, padding=(0, 0), expand=True)
+    table.add_column(width=2, no_wrap=True)
+    table.add_column()
+    table.add_row("[bold white]●[/bold white] ", Markdown(text))
+    console.print(table)
 
 
 def estimate_analyze(project_dir: str, config: dict, focus: str = None) -> dict:
