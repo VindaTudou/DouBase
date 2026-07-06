@@ -298,8 +298,12 @@ def run_ingest(paths: list[str], config: dict, skip_confirm: bool = False):
     return results
 
 
-def _build_ask_prompt(question: str, chunks: list[dict]) -> list[dict]:
-    """构建混合 RAG 提示词：本地知识 + LLM 知识。"""
+def _build_ask_prompt(
+    question: str,
+    chunks: list[dict],
+    history: list[dict] = None,
+) -> list[dict]:
+    """构建混合 RAG 提示词：本地知识 + LLM 知识 + 对话历史。"""
     system_prompt = """你是一个知识助手。请综合以下两个来源来回答用户问题:
 1. 用户本地笔记中的相关内容 (见下文)
 2. 你自己的通用知识
@@ -310,6 +314,13 @@ def _build_ask_prompt(question: str, chunks: list[dict]) -> list[dict]:
 - 不要编造本地笔记中不存在的内容
 - 用中文回答"""
 
+    messages = [{"role": "system", "content": system_prompt}]
+
+    # 注入对话历史
+    if history:
+        messages.extend(history)
+
+    # 当前问题 + 检索结果
     user_parts = [question]
     if chunks:
         user_parts.append("\n---\n本地检索结果:")
@@ -321,10 +332,8 @@ def _build_ask_prompt(question: str, chunks: list[dict]) -> list[dict]:
             "\n(本地笔记中未找到相关内容，请使用你的通用知识回答)"
         )
 
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "\n".join(user_parts)},
-    ]
+    messages.append({"role": "user", "content": "\n".join(user_parts)})
+    return messages
 
 
 def run_ask(
@@ -335,6 +344,7 @@ def run_ask(
     render_markdown: bool = False,
     on_before_stream=None,
     on_retrieval_done=None,
+    history: list[dict] = None,
 ):
     """运行 RAG 问答流水线：检索 + 生成回答。
 
@@ -346,6 +356,10 @@ def run_ask(
         render_markdown: True 时累积全文后用 Rich Markdown 渲染（REPL 模式）。
         on_before_stream: 开始输出回答前调用的回调（无参数）。用于停止 spinner。
         on_retrieval_done: 检索完成后、LLM 生成前调用的回调（无参数）。
+        history: 对话历史消息列表 [{role, content}, ...]，用于多轮记忆。
+
+    Returns:
+        str: 助手的完整回复文本。
     """
     top_k = config.get("retrieval", {}).get("top_k", 5)
 
@@ -389,7 +403,7 @@ def run_ask(
         on_retrieval_done()
 
     # 构建提示词
-    messages = _build_ask_prompt(question, chunks)
+    messages = _build_ask_prompt(question, chunks, history=history)
 
     if render_markdown:
         # REPL 模式: Live 流式纯文本 → 最后帧切换为 Markdown
@@ -400,26 +414,30 @@ def run_ask(
         if on_before_stream:
             on_before_stream()
 
-        accumulator = ""
+        accumulator = "● "
         try:
-            with Live(Text("●"), console=console, refresh_per_second=15) as live:
+            with Live(Text(accumulator), console=console, refresh_per_second=15) as live:
                 for token in llm.chat_stream(messages):
                     accumulator += token
-                    live.update(Text(f"● {accumulator}"))
-                # 最终帧切换为完整 Markdown 渲染（圆点放在 Markdown 内首行）
-                live.update(Markdown("● " + accumulator))
+                    live.update(Text(accumulator))
+                # 最终帧切换为完整 Markdown 渲染
+                live.update(Markdown(accumulator))
         except Exception as e:
             console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
             console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
+        return accumulator
     else:
         # CLI 模式：流式逐 token 输出
+        accumulator = ""
         try:
             for token in llm.chat_stream(messages):
+                accumulator += token
                 console.print(token, end="", highlight=False)
             console.print()
         except Exception as e:
             console.print(f"\n[red]❌ LLM 调用失败: {e}[/red]")
             console.print("[dim]请检查网络连接和 API Key 配置。[/dim]")
+        return accumulator
 
 
 
