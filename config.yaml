@@ -68,3 +68,9 @@ pricing:
   openai:
     input_price: 2.5
     output_price: 10.0
+
+# 查询优化
+query_optimization:
+  context_rewrite: true    # 上下文补全（需多轮记忆）
+  decompose: true          # 子问题拆解
+  decompose_max: 3         # 最多拆成几个子问题

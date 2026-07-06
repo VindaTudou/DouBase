@@ -379,15 +379,50 @@ def run_ask(
 
     llm = get_llm(config, override_provider=llm_override)
 
-    # 检查知识库是否为空
+    # --- Phase 1: 上下文补全 ---
+    opt_config = config.get("query_optimization", {})
+    if history and opt_config.get("context_rewrite", True):
+        from doubase.query_optimizer import rewrite_query
+        rewritten = rewrite_query(question, history, llm)
+        if rewritten and rewritten.strip() and rewritten != question:
+            question = rewritten
+
+    # --- Phase 2: 子问题拆解 ---
+    sub_questions = None
+    if opt_config.get("decompose", True):
+        from doubase.query_optimizer import decompose_query
+        max_count = opt_config.get("decompose_max", 3)
+        sub_qs = decompose_query(question, llm, max_count)
+        if len(sub_qs) > 1:
+            sub_questions = sub_qs
+
+    # --- 检索 ---
     if store.count() == 0:
         console.print(
             "[yellow]知识库为空。请先执行 doubase ingest 导入笔记。[/yellow]"
         )
         console.print("[dim]将仅使用 LLM 自身知识回答...[/dim]")
         chunks = []
+    elif sub_questions:
+        # 多子问题：各独立检索 + 合并去重
+        all_chunks = []
+        seen = set()
+        for sub_q in sub_questions:
+            retriever = Retriever(embedder=embedder, vector_store=store)
+            sub_chunks = retriever.retrieve(sub_q, top_k=top_k)
+            for c in sub_chunks:
+                key = (c["source_path"], c["text"][:80])
+                if key not in seen:
+                    seen.add(key)
+                    all_chunks.append(c)
+        all_chunks.sort(key=lambda c: c["distance"])
+        chunks = all_chunks[:top_k * 2]
+        console.print(
+            f"[dim]问题已拆解为 {len(sub_questions)} 个子问题, "
+            f"检索到 {len(chunks)} 个去重片段[/dim]"
+        )
     else:
-        # 检索
+        # 单问题：原有检索逻辑
         retriever = Retriever(embedder=embedder, vector_store=store)
         chunks = retriever.retrieve(question, top_k=top_k)
 
@@ -404,6 +439,15 @@ def run_ask(
 
     # 构建提示词
     messages = _build_ask_prompt(question, chunks, history=history)
+
+    # 子问题拆解提示
+    if sub_questions:
+        decompose_note = (
+            f"[查询优化] 已拆解为以下子问题分别检索:\n"
+            + "\n".join(f"{i+1}. {q}" for i, q in enumerate(sub_questions))
+            + "\n请综合所有检索结果，给出一个完整回答。"
+        )
+        messages.insert(1, {"role": "system", "content": decompose_note})
 
     if render_markdown:
         # REPL 模式: Live 流式纯文本 → 最后帧切换为 Markdown
