@@ -1,7 +1,16 @@
 """核心流水线：ingest 和 ask。"""
 
 import hashlib
+import re
 from pathlib import Path
+
+# 匹配 surrogate 字符（U+D800-U+DFFF），LLM 偶尔输出非法 Unicode
+_SURROGATE_RE = re.compile(r'[\ud800-\udfff]')
+
+
+def _sanitize_text(text: str) -> str:
+    """移除字符串中的 surrogate 字符，防止 print() 崩溃。"""
+    return _SURROGATE_RE.sub('', text)
 
 from doubase.parsers import get_parser
 from doubase.chunker.chunker import Chunker, chunk_by_headings
@@ -326,7 +335,7 @@ def _build_ask_prompt(
         user_parts.append("\n---\n本地检索结果:")
         for i, chunk in enumerate(chunks, 1):
             source = chunk.get("source_path", "unknown")
-            user_parts.append(f"\n[来源 {i}: {source}]\n{chunk['text']}")
+            user_parts.append(f"\n[来源 {i}: {source}]\n{_sanitize_text(chunk['text'])}")
     else:
         user_parts.append(
             "\n(本地笔记中未找到相关内容，请使用你的通用知识回答)"
@@ -449,6 +458,11 @@ def run_ask(
         )
         messages.insert(1, {"role": "system", "content": decompose_note})
 
+    # 安全流式生成器，过滤掉所有 surrogate 字符
+    def _safe_stream(messages):
+        for token in llm.chat_stream(messages):
+            yield _sanitize_text(token)
+
     if render_markdown:
         # REPL 模式: Live 流式纯文本 → 最后帧切换为 Markdown
         from rich.live import Live
@@ -461,7 +475,7 @@ def run_ask(
         accumulator = "● "
         try:
             with Live(Text(accumulator), console=console, refresh_per_second=15) as live:
-                for token in llm.chat_stream(messages):
+                for token in _safe_stream(messages):
                     accumulator += token
                     live.update(Text(accumulator))
                 # 最终帧切换为完整 Markdown 渲染
@@ -474,7 +488,7 @@ def run_ask(
         # CLI 模式：流式逐 token 输出
         accumulator = ""
         try:
-            for token in llm.chat_stream(messages):
+            for token in _safe_stream(messages):
                 accumulator += token
                 console.print(token, end="", highlight=False)
             console.print()

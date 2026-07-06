@@ -1,6 +1,15 @@
 """查询优化 — 上下文补全 + 子问题拆解。"""
 
 import re
+
+# 匹配 surrogate 字符（U+D800-U+DFFF）
+_SURROGATE_RE = re.compile(r'[\ud800-\udfff]')
+
+
+def _sanitize(text: str) -> str:
+    return _SURROGATE_RE.sub('', text)
+
+
 from doubase.generation.base import BaseLLM
 
 REWRITE_PROMPT = """你是一个查询优化器。根据对话历史判断用户当前问题是否需要上下文补全。
@@ -55,7 +64,7 @@ def rewrite_query(question: str, history: list[dict], llm: BaseLLM) -> str:
         history=history_text,
     )
     try:
-        rewritten = llm.chat([{"role": "user", "content": prompt}]).strip()
+        rewritten = _sanitize(llm.chat([{"role": "user", "content": prompt}])).strip()
         return rewritten if rewritten else question
     except Exception:
         return question
@@ -77,7 +86,7 @@ def decompose_query(question: str, llm: BaseLLM, max_count: int = 3) -> list[str
         max_count=max_count,
     )
     try:
-        reply = llm.chat([{"role": "user", "content": prompt}]).strip()
+        reply = _sanitize(llm.chat([{"role": "user", "content": prompt}])).strip()
         if not reply:
             return [question]
 
