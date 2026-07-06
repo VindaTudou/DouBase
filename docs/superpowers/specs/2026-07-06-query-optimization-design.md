@@ -19,17 +19,17 @@ run_ask(question, history):
        │
        ▼
 ┌──────────────────────┐
-│  Phase 1: 上下文补全   │  仅当有 history + LLM 判断需要
-│  _rewrite_query()    │
+│  Phase 1: 上下文补全   │  仅当有 history 时执行
+│  _rewrite_query()    │  LLM 判断是否需要补全
 │  in: 原始问题 + 历史  │
-│  out: 补全后的问题    │
+│  out: 补全后的问题    │  (补全与否都继续 ↓)
 └──────────┬───────────┘
            │
            ▼
 ┌──────────────────────┐
-│  Phase 2: 子问题拆解  │  LLM 判断是否包含多问
-│  _decompose_query()  │
-│  in: 优化后的问题     │
+│  Phase 2: 子问题拆解  │  独立执行，不依赖 Phase 1
+│  _decompose_query()  │  LLM 独立判断是否需拆解
+│  in: Phase1 结果      │
 │  out: 1-N 个子问题    │
 └──────────┬───────────┘
            │ N 个子问题
@@ -63,7 +63,7 @@ LLM 一步完成"判断是否需要补全"和"输出补全后的问题"：
 输出格式: 仅输出最终问题文本，不要任何解释。
 ```
 
-若 LLM 返回的文本和原始问题相同（或高度相似），视为不需要补全，跳过 Phase 2 仅用原问题继续。
+Phase 1 和 Phase 2 完全独立。无论补全与否，Phase 2 都会执行。
 
 ### 3.2 Prompt 模板
 
@@ -184,13 +184,13 @@ def run_ask(question, config, ..., history=None):
     rewrite_token_cost = 0
     decompose_token_cost = 0
     
-    # Phase 1: 上下文补全
+    # Phase 1: 上下文补全（独立执行，仅在有历史时）
     if history and opt_config.get("context_rewrite", True):
         rewritten = _rewrite_query(question, history, llm)
         if rewritten and rewritten != question:
             question = rewritten
     
-    # Phase 2: 子问题拆解
+    # Phase 2: 子问题拆解（独立执行，不依赖 Phase 1 结果）
     if opt_config.get("decompose", True):
         max_count = opt_config.get("decompose_max", 3)
         sub_questions = _decompose_query(question, llm, max_count)
