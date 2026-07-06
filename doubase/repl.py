@@ -1,4 +1,4 @@
-"""DouBase 交互式 REPL — 直接对话模式，支持 / 命令。"""
+"""DouBase 交互式 REPL — 直接对话模式，支持 / 命令和多轮对话记忆。"""
 
 import shlex
 import sys
@@ -10,6 +10,7 @@ from rich.text import Text
 
 from doubase.config import load_config
 from doubase.pipeline import run_ingest, run_ask, run_analyze
+from doubase.memory import ConversationMemory
 
 console = Console(highlight=False)
 
@@ -21,10 +22,11 @@ HELP_TEXT = """[bold]可用命令:[/bold]
   [cyan]/ingest --watch <目录>[/cyan] 监控目录自动导入
   [cyan]/analyze <项目路径>[/cyan]  分析代码项目并入库
   [cyan]/analyze <路径> --focus <子目录>[/cyan]
+  [cyan]/clear[/cyan]             清空对话记忆
   [cyan]/help[/cyan]              显示此帮助
   [cyan]/exit[/cyan]              退出"""
 
-HINT_TEXT = "[dim]💡 直接输入问题即可提问 | /ingest 导入 | /analyze 分析 | /help 帮助 | /exit 退出[/dim]"
+HINT_TEXT = "[dim]💡 直接输入问题即可提问 | /ingest 导入 | /analyze 分析 | /clear 清记忆 | /help 帮助 | /exit 退出[/dim]"
 
 PROMPT = "[bold green]\n›[/bold green] "
 
@@ -51,11 +53,17 @@ class RunningIndicator:
             self._status.stop()
 
 
-def _make_welcome() -> Panel:
+def _make_welcome(memory: ConversationMemory = None) -> Panel:
+    """构建欢迎面板，显示记忆状态。"""
     content = Text.from_markup(
         "直接输入问题，或用 [cyan]/[/cyan] 命令操作\n"
         "输入 [cyan]/help[/cyan] 查看可用命令"
     )
+    total_turns = 0
+    if memory:
+        total_turns = memory.summary_turns + len(memory.messages) // 2
+    if total_turns > 0:
+        content.append(f"\n\n[dim]📝 已加载 {total_turns} 轮历史对话[/dim]")
     return Panel(content, title="🧠 DouBase REPL", border_style="bold")
 
 
@@ -91,14 +99,23 @@ def _parse_command(text: str) -> tuple[str | None, str]:
         return None, text
 
 
-def _handle_command(cmd: str, args: str, config: dict) -> bool:
+def _handle_command(cmd: str, args: str, config: dict, memory: ConversationMemory = None) -> bool:
     """处理一条 / 命令。返回 False 表示退出 REPL。"""
     if cmd == "exit" or cmd == "quit":
+        if memory:
+            memory.save("default")
         console.print("[dim]再见！[/dim]")
         return False
 
     elif cmd == "help":
         console.print(HELP_TEXT)
+
+    elif cmd == "clear":
+        if memory:
+            memory.clear()
+            console.print("[dim]🗑️  对话记忆已清空[/dim]")
+        else:
+            console.print("[dim]当前无记忆[/dim]")
 
     elif cmd == "ingest":
         if not args:
@@ -153,16 +170,39 @@ def _handle_command(cmd: str, args: str, config: dict) -> bool:
     return True
 
 
-def start_repl(config_path: str = None):
-    """启动 DouBase 交互式 REPL。"""
+def start_repl(config_path: str = None, resume: str = None, new: bool = False):
+    """启动 DouBase 交互式 REPL。
+
+    Args:
+        config_path: 配置文件路径。
+        resume: 加载指定会话名。"default"、日期等。True 时加载 "default"。
+        new: True 时强制新会话，不加载历史。
+    """
     try:
         config = load_config(config_path)
     except FileNotFoundError as e:
         console.print(f"[red]❌ 配置错误: {e}[/red]")
         sys.exit(1)
 
+    # 初始化记忆
+    if new:
+        memory = ConversationMemory()
+    elif resume:
+        name = resume if resume is not True else "default"
+        memory = ConversationMemory.load(name)
+    else:
+        memory = ConversationMemory()
+
     _touch_activity()
-    console.print(_make_welcome())
+    console.print(_make_welcome(memory=memory))
+
+    # 缓存 LLM 实例用于压缩
+    llm = None
+    try:
+        from doubase.generation import get_llm
+        llm = get_llm(config)
+    except Exception:
+        pass
 
     while True:
         _check_idle_hint()
@@ -176,6 +216,7 @@ def start_repl(config_path: str = None):
             user_input = user_input.strip()
             _touch_activity()
         except (EOFError, KeyboardInterrupt):
+            memory.save("default")
             console.print("\n[dim]再见！[/dim]")
             break
 
@@ -187,10 +228,14 @@ def start_repl(config_path: str = None):
             spinner = RunningIndicator("正在检索")
             spinner.start()
             try:
-                run_ask(
+                history = memory.get_history()
+                answer = run_ask(
                     question=content, config=config, render_markdown=True,
+                    history=history,
                     on_retrieval_done=spinner.stop,
                 )
+                if answer:
+                    memory.add(content, answer, llm=llm)
             except ValueError as e:
                 spinner.stop()
                 console.print(f"[red]❌ {e}[/red]")
@@ -199,7 +244,7 @@ def start_repl(config_path: str = None):
                 console.print(f"[red]❌ 出错了: {e}[/red]")
         else:
             try:
-                keep_running = _handle_command(cmd, content, config)
+                keep_running = _handle_command(cmd, content, config, memory=memory)
                 if not keep_running:
                     break
             except Exception as e:

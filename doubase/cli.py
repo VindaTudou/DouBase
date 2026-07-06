@@ -73,6 +73,10 @@ def main():
 
     # --- repl ---
     repl_parser = subparsers.add_parser("repl", help="进入交互式对话模式")
+    repl_parser.add_argument("--resume", "-r", nargs="?", const=True,
+                             help="加载历史会话（默认 default，可指定会话名）")
+    repl_parser.add_argument("--new", "-n", action="store_true",
+                             help="强制新会话")
 
     args = parser.parse_args()
 
@@ -128,7 +132,9 @@ def main():
 
         elif args.command == "repl":
             from doubase.repl import start_repl
-            start_repl()
+            resume_val = args.resume if hasattr(args, 'resume') else None
+            new_val = args.new if hasattr(args, 'new') else False
+            start_repl(resume=resume_val, new=new_val)
     except ValueError as e:
         print(f"❌ 配置错误: {e}", file=sys.stderr)
         sys.exit(1)
