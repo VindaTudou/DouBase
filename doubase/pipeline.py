@@ -17,7 +17,7 @@ from doubase.chunker.chunker import Chunker, chunk_by_headings
 from doubase.chunker.semantic_merger import merge_semantically
 from doubase.embedding import get_embedder
 from doubase.storage.vector_store import VectorStore
-from doubase.retrieval.retriever import Retriever
+from doubase.retrieval.retriever import Retriever, rerank
 from doubase.generation import get_llm
 from doubase.analyzer.scanner import scan_project
 
@@ -425,22 +425,33 @@ def run_ask(
                     seen.add(key)
                     all_chunks.append(c)
         all_chunks.sort(key=lambda c: c["distance"])
-        chunks = all_chunks[:top_k * 2]
+        # 对合并后的 chunks 做关键词重排序
+        chunks = rerank(question, all_chunks, top_k=min(top_k * 2, len(all_chunks)))
         console.print(
             f"[dim]问题已拆解为 {len(sub_questions)} 个子问题, "
-            f"检索到 {len(chunks)} 个去重片段[/dim]"
+            f"检索到 {len(chunks)} 个去重片段（混合重排序）[/dim]"
         )
     else:
-        # 单问题：原有检索逻辑
+        # 单问题：向量检索 + 关键词重排序
+        ret_config = config.get("retrieval", {})
         retriever = Retriever(embedder=embedder, vector_store=store)
-        chunks = retriever.retrieve(question, top_k=top_k)
+        candidates = retriever.retrieve(question, top_k=top_k * 3)
+        if candidates and ret_config.get("hybrid_search", True):
+            vw = float(ret_config.get("vector_weight", 0.6))
+            kw = float(ret_config.get("keyword_weight", 0.4))
+            chunks = rerank(question, candidates, top_k=top_k,
+                            vector_weight=vw, keyword_weight=kw)
+        elif candidates:
+            chunks = candidates[:top_k]
+        else:
+            chunks = []
 
         if not chunks:
             console.print(
                 "[dim]本地笔记中未找到相关内容，将仅使用通用知识回答。[/dim]"
             )
         else:
-            console.print(f"[dim]检索到 {len(chunks)} 个相关片段[/dim]")
+            console.print(f"[dim]检索到 {len(chunks)} 个相关片段（混合重排序）[/dim]")
 
     # 通知外部：检索已完成
     if on_retrieval_done:

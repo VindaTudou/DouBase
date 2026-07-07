@@ -46,6 +46,9 @@ chunker:
 # 检索参数
 retrieval:
   top_k: 15
+  hybrid_search: true          # 混合检索（向量 + 关键词重排序）
+  vector_weight: 0.6           # 向量分数权重
+  keyword_weight: 0.4          # 关键词分数权重
 
 # 监控目录
 watch:
