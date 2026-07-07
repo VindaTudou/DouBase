@@ -1,6 +1,7 @@
-"""测试关键词重排序。"""
+"""测试关键词重排序 + LLM 重排序。"""
 
-from doubase.retrieval.retriever import _tokenize, _keyword_score, rerank
+from unittest.mock import MagicMock
+from doubase.retrieval.retriever import _tokenize, _keyword_score, rerank, llm_rerank
 
 
 def test_tokenize_chinese_bigrams():
@@ -55,4 +56,42 @@ def test_rerank_respects_top_k():
         for i in range(20)
     ]
     result = rerank("document", chunks, top_k=5)
+    assert len(result) == 5
+
+
+def test_llm_rerank_parses_scores():
+    """LLM 返回打分 → 解析后按分数重排"""
+    query = "Redis 持久化"
+    chunks = [
+        {"text": "无关内容", "source_path": "a.md"},
+        {"text": "Redis RDB 快照持久化", "source_path": "b.md"},
+        {"text": "Redis AOF 日志持久化", "source_path": "c.md"},
+    ]
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "1. 1\n2. 5\n3. 4"
+
+    result = llm_rerank(query, chunks, mock_llm, top_k=2)
+    assert len(result) == 2
+    assert result[0]["llm_score"] == 5  # b.md 应该在第一个
+    assert "RDB" in result[0]["text"]
+
+
+def test_llm_rerank_fallback_on_error():
+    """LLM 调用失败 → 返回原顺序"""
+    mock_llm = MagicMock()
+    mock_llm.chat.side_effect = Exception("API error")
+    chunks = [
+        {"text": f"chunk {i}", "source_path": "x.md"}
+        for i in range(5)
+    ]
+    result = llm_rerank("test", chunks, mock_llm, top_k=3)
+    assert len(result) == 3
+
+
+def test_llm_rerank_truncates_to_10():
+    """超过 10 个 chunk → 只评前 10 个"""
+    chunks = [{"text": f"chunk {i}", "source_path": "x.md"} for i in range(15)]
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "\n".join(f"{i+1}. 3" for i in range(10))
+    result = llm_rerank("test", chunks, mock_llm, top_k=5)
     assert len(result) == 5

@@ -89,3 +89,73 @@ class Retriever:
         """
         query_vector = self._embedder.embed_query(query)
         return self._store.search(query_vector, top_k)
+
+
+LLM_RERANK_PROMPT = """评估以下文档片段与用户问题的相关性。为每个片段打分（1-5 分）：
+
+5 = 直接回答了问题
+4 = 高度相关，包含关键信息
+3 = 部分相关
+2 = 弱相关
+1 = 不相关
+
+用户问题: {query}
+
+{chunks}
+
+请按以下格式输出评分（每行一个: 编号 + 分数):
+1. 4
+2. 2
+3. 5
+...
+仅输出编号和分数，不要任何解释。"""
+
+
+def llm_rerank(query: str, chunks: list[dict], llm, top_k: int = 5) -> list[dict]:
+    """LLM 重排序：让 LLM 判断每个 chunk 与问题的相关性，按 LLM 分数重排。
+
+    将最多 10 个候选 chunks 批量发给 LLM 打分，然后按分数降序返回 top-K。
+
+    Args:
+        query: 用户查询文本。
+        chunks: 关键词融合后的候选列表（最多 10 个）。
+        llm: BaseLLM 实例。
+        top_k: 最终返回数量。
+
+    Returns:
+        LLM 重排序后的 top-K chunks。
+    """
+    if not chunks:
+        return []
+
+    candidates = chunks[:10]  # 最多 10 个
+
+    # 构建批量评分 prompt
+    chunk_texts = ""
+    for i, c in enumerate(candidates, 1):
+        snippet = c["text"][:300]  # 截断，控制 token 消耗
+        chunk_texts += f"[{i}] {snippet}\n\n"
+
+    prompt = LLM_RERANK_PROMPT.format(query=query, chunks=chunk_texts)
+
+    try:
+        reply = llm.chat([{"role": "user", "content": prompt}]).strip()
+    except Exception:
+        # LLM 调用失败 → 返回原顺序
+        return candidates[:top_k]
+
+    # 解析 "1. 5\n2. 3\n..." 格式
+    scores: dict[int, float] = {}
+    for line in reply.split("\n"):
+        m = re.match(r"(\d+)[\.\)、]\s*([1-5])", line.strip())
+        if m:
+            idx = int(m.group(1))
+            score = int(m.group(2))
+            scores[idx] = score
+
+    # 将分数附加到 chunks
+    for i, c in enumerate(candidates, 1):
+        c["llm_score"] = scores.get(i, 3)  # 默认 3 分（中性）
+
+    candidates.sort(key=lambda c: c.get("llm_score", 3), reverse=True)
+    return candidates[:top_k]

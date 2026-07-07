@@ -47,6 +47,7 @@ chunker:
 retrieval:
   top_k: 15
   hybrid_search: true          # 混合检索（向量 + 关键词重排序）
+  llm_rerank: true             # LLM 重排序（混合检索后再精选一次）
   vector_weight: 0.6           # 向量分数权重
   keyword_weight: 0.4          # 关键词分数权重
 

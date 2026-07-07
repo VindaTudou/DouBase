@@ -17,7 +17,7 @@ from doubase.chunker.chunker import Chunker, chunk_by_headings
 from doubase.chunker.semantic_merger import merge_semantically
 from doubase.embedding import get_embedder
 from doubase.storage.vector_store import VectorStore
-from doubase.retrieval.retriever import Retriever, rerank
+from doubase.retrieval.retriever import Retriever, rerank, llm_rerank
 from doubase.generation import get_llm
 from doubase.analyzer.scanner import scan_project
 
@@ -432,15 +432,24 @@ def run_ask(
             f"检索到 {len(chunks)} 个去重片段（混合重排序）[/dim]"
         )
     else:
-        # 单问题：向量检索 + 关键词重排序
+        # 单问题：向量检索 → 关键词融合 → LLM 重排序
         ret_config = config.get("retrieval", {})
         retriever = Retriever(embedder=embedder, vector_store=store)
         candidates = retriever.retrieve(question, top_k=top_k * 3)
         if candidates and ret_config.get("hybrid_search", True):
             vw = float(ret_config.get("vector_weight", 0.6))
             kw = float(ret_config.get("keyword_weight", 0.4))
-            chunks = rerank(question, candidates, top_k=top_k,
-                            vector_weight=vw, keyword_weight=kw)
+            # Stage 1: 关键词融合 → top-10
+            fusion_chunks = rerank(question, candidates, top_k=min(10, len(candidates)),
+                                    vector_weight=vw, keyword_weight=kw)
+            # Stage 2: LLM 重排序 → top-K
+            if ret_config.get("llm_rerank", True) and fusion_chunks:
+                chunks = llm_rerank(question, fusion_chunks, llm, top_k=top_k)
+                # LLM 分均为 3 说明解析失败，保留融合结果
+                if chunks and all(c.get("llm_score", 0) == 3 for c in chunks):
+                    chunks = fusion_chunks[:top_k]
+            else:
+                chunks = fusion_chunks[:top_k]
         elif candidates:
             chunks = candidates[:top_k]
         else:
@@ -451,7 +460,7 @@ def run_ask(
                 "[dim]本地笔记中未找到相关内容，将仅使用通用知识回答。[/dim]"
             )
         else:
-            console.print(f"[dim]检索到 {len(chunks)} 个相关片段（混合重排序）[/dim]")
+            console.print(f"[dim]检索到 {len(chunks)} 个相关片段（混合重排序 + LLM 精选）[/dim]")
 
     # 通知外部：检索已完成
     if on_retrieval_done:
