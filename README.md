@@ -7,14 +7,15 @@
 - **RAG 问答** — 提问，结合本地笔记 + LLM 知识给出混合回答
 - **交互式 REPL** — 进入对话模式，直接输入问题，支持 `/` 命令操作
 - **多轮对话记忆** — 自动记忆对话上下文，支持追问，超限自动摘要压缩
-- **查询优化** — LLM 上下文补全（代词消解）+ 复杂问题子问题拆解
-- **混合检索** — 向量相似度 + 关键词命中率加权融合排序，提升召回质量
+- **查询优化** — LLM 上下文补全（代词消解）+ 复杂问题子问题拆解 + RAG 门控判断（避免无意义检索）
+- **混合检索** — 向量相似度 + 关键词命中率加权融合 → LLM 精排序，三层漏斗提升召回质量
 - **智能分块** — 三级策略：Markdown `#` 标题语义切分 → 滑动窗口兜底 → LLM 保守合并
+- **API 重试** — 指数退避自动重试（429/5xx/超时），确保 API 临时故障不中断
 - **文档导入** — 导入 `.md`、`.docx`、`.pdf` 文件到 ChromaDB 向量库，SHA256 增量去重
 - **代码分析** — 分析外部项目，自动生成 Markdown 总结并入库
 - **费用估算** — 调用 API 前展示预估，确认后执行
 - **监控模式** — 自动导入放入监控目录的新文件
-- **提供商切换** — LLM（DeepSeek/OpenAI）和 Embedding（ZhipuAI/本地）可配置切换
+- **提供商切换** — LLM（DeepSeek/OpenAI/兼容）和 Embedding（ZhipuAI/本地）可配置切换
 
 ## 快速开始
 
@@ -138,9 +139,10 @@ chunker:
   semantic_merge: true       # LLM 语义合并
 
 query_optimization:
-  context_rewrite: true      # 上下文补全
+  context_rewrite: true      # 上下文补全（代词消解）
   decompose: true            # 子问题拆解
   decompose_max: 3           # 最多拆几个子问题
+  rag_gating: true           # RAG 门控：LLM 判断是否需要检索
 ```
 
 所有可用环境变量见 `.env.example`。
@@ -175,7 +177,7 @@ CLI 命令:
   doubase analyze <project>      分析代码项目
 
 Ingest 流水线:   解析 → 哈希去重 → 三级分块 → Embedding → ChromaDB
-Ask 流水线:      查询优化(补全+拆解) → 混合检索(向量+关键词) → Prompt → LLM 流式回答
+Ask 流水线:      查询优化(补全+拆解+门控) → 混合检索(向量+关键词+LLM精排) → Prompt → LLM 流式回答
 Analyze 流水线:  扫描器 → LLM 文件分析 → 写入器(.md) → 自动入库
 
 模块: config / parsers / chunker / embedding / storage / retrieval / generation /
@@ -189,7 +191,7 @@ pip install -e .
 pytest tests/ -v
 ```
 
-89 个单元测试，覆盖解析器、分块器、向量存储、检索器、LLM 接口、查询优化、对话记忆等全部模块。
+**106 个单元测试**，覆盖解析器、分块器、向量存储、检索器、LLM 接口、查询优化、对话记忆、API 重试等全部模块。
 
 ## 技术栈
 

@@ -311,9 +311,21 @@ def _build_ask_prompt(
     question: str,
     chunks: list[dict],
     history: list[dict] = None,
+    skip_rag: bool = False,
 ) -> list[dict]:
-    """构建混合 RAG 提示词：本地知识 + LLM 知识 + 对话历史。"""
-    system_prompt = """你是一个知识助手。请综合以下两个来源来回答用户问题:
+    """构建混合 RAG 提示词：本地知识 + LLM 知识 + 对话历史。
+
+    Args:
+        skip_rag: True 时表示有意跳过了 RAG 检索，使用纯 LLM 模式。
+    """
+    if skip_rag:
+        system_prompt = """你是一个知识助手。请用你的通用知识来回答用户问题。
+
+规则:
+- 用中文回答
+- 如果问题超出你的知识范围，诚实说明"""
+    else:
+        system_prompt = """你是一个知识助手。请综合以下两个来源来回答用户问题:
 1. 用户本地笔记中的相关内容 (见下文)
 2. 你自己的通用知识
 
@@ -331,7 +343,10 @@ def _build_ask_prompt(
 
     # 当前问题 + 检索结果
     user_parts = [question]
-    if chunks:
+    if skip_rag:
+        # 纯 LLM 模式，不需要检索结果
+        pass
+    elif chunks:
         user_parts.append("\n---\n本地检索结果:")
         for i, chunk in enumerate(chunks, 1):
             source = chunk.get("source_path", "unknown")
@@ -405,8 +420,19 @@ def run_ask(
         if len(sub_qs) > 1:
             sub_questions = sub_qs
 
+    # --- Phase 3: RAG 门控判断 ---
+    skip_rag = False
+    if opt_config.get("rag_gating", True):
+        from doubase.query_optimizer import should_retrieve
+        need_rag = should_retrieve(question, llm, history)
+        if not need_rag:
+            skip_rag = True
+            console.print("[dim]LLM 判断无需检索本地知识库，直接回答...[/dim]")
+
     # --- 检索 ---
-    if store.count() == 0:
+    if skip_rag:
+        chunks = []
+    elif store.count() == 0:
         console.print(
             "[yellow]知识库为空。请先执行 doubase ingest 导入笔记。[/yellow]"
         )
@@ -467,7 +493,7 @@ def run_ask(
         on_retrieval_done()
 
     # 构建提示词
-    messages = _build_ask_prompt(question, chunks, history=history)
+    messages = _build_ask_prompt(question, chunks, history=history, skip_rag=skip_rag)
 
     # 子问题拆解提示
     if sub_questions:

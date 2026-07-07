@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-from doubase.query_optimizer import rewrite_query, decompose_query
+from doubase.query_optimizer import rewrite_query, decompose_query, should_retrieve
 
 
 def test_rewrite_query_with_pronoun():
@@ -69,3 +69,59 @@ def test_decompose_llm_error_falls_back():
     mock_llm.chat.side_effect = Exception("API error")
     result = decompose_query("RDB 和 AOF 的区别？", mock_llm)
     assert result == ["RDB 和 AOF 的区别？"]
+
+
+def test_should_retrieve_yes():
+    """LLM 返回 YES → 需要检索"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "YES"
+    result = should_retrieve("我的笔记里关于 Redis 的记录是什么？", mock_llm)
+    assert result is True
+
+
+def test_should_retrieve_no():
+    """LLM 返回 NO → 不需要检索"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "NO"
+    result = should_retrieve("Python 中如何反转列表？", mock_llm)
+    assert result is False
+
+
+def test_should_retrieve_with_history():
+    """带对话历史的门控判断"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "YES"
+    history = [
+        {"role": "user", "content": "我的项目里用了什么数据库？"},
+        {"role": "assistant", "content": "你的项目使用 Redis 作为缓存。"},
+    ]
+    result = should_retrieve("它的配置是什么？", mock_llm, history=history)
+    mock_llm.chat.assert_called_once()
+    call_args = mock_llm.chat.call_args[0][0]
+    # prompt 应包含对话历史
+    assert "Redis" in call_args[0]["content"]
+    assert result is True
+
+
+def test_should_retrieve_error_falls_back_to_true():
+    """LLM 调用失败 → 默认检索（宁可多查不漏查）"""
+    mock_llm = MagicMock()
+    mock_llm.chat.side_effect = Exception("API timeout")
+    result = should_retrieve("任意问题", mock_llm)
+    assert result is True
+
+
+def test_should_retrieve_empty_response_falls_back():
+    """LLM 返回空字符串 → 默认检索"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = ""
+    result = should_retrieve("任意问题", mock_llm)
+    assert result is True
+
+
+def test_should_retrieve_lowercase_yes():
+    """LLM 返回小写 yes → 识别为需要检索"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "yes"
+    result = should_retrieve("我的笔记里有什么？", mock_llm)
+    assert result is True

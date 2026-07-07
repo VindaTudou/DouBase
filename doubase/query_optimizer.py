@@ -1,4 +1,4 @@
-"""查询优化 — 上下文补全 + 子问题拆解。"""
+"""查询优化 — 上下文补全 + 子问题拆解 + RAG 门控判断。"""
 
 import re
 
@@ -99,3 +99,61 @@ def decompose_query(question: str, llm: BaseLLM, max_count: int = 3) -> list[str
         return sub_questions if sub_questions else [question]
     except Exception:
         return [question]
+
+
+RAG_GATING_PROMPT = """判断以下用户问题是否需要检索本地知识库来回答。
+
+需要检索本地知识库（回答 YES）:
+- 问题涉及用户的个人笔记、文档、项目、代码库
+- 问题提到具体文件、记录、或引用"我"的内容
+- 问题询问特定领域知识，用户的本地笔记中可能包含
+- 问题包含"我的笔记"、"我记录过"、"我之前"等指向个人内容
+- 问题涉及特定项目、代码分析、或本地文档内容
+
+不需要检索（回答 NO）:
+- 常识性问题（如"水的沸点是多少"、"光速是多少"）
+- 通用编程知识（如"Python 中如何反转列表"、"什么是闭包"）
+- 翻译任务
+- 纯粹的闲聊、问候、或自我介绍
+- 纯数学计算、逻辑推理
+- LLM 自身训练数据即可覆盖的通用知识
+
+对话历史:
+{history}
+
+用户问题: {question}
+
+请只回答 YES 或 NO，不要任何解释。"""
+
+
+def should_retrieve(question: str, llm: BaseLLM, history: list[dict] = None) -> bool:
+    """LLM 判断是否需要检索本地知识库。
+
+    Args:
+        question: 用户问题（可能已经过上下文补全）。
+        llm: LLM 实例。
+        history: 对话历史 [{role, content}, ...]。
+
+    Returns:
+        True 表示需要 RAG 检索，False 表示可以直接用 LLM 知识回答。
+    """
+    history_text = ""
+    if history:
+        history_text = "\n".join(
+            f"[{h['role']}]: {h['content'][:200]}" for h in history
+        )
+
+    prompt = RAG_GATING_PROMPT.format(
+        question=question,
+        history=history_text if history_text else "（无历史对话）",
+    )
+
+    try:
+        reply = _sanitize(llm.chat([{"role": "user", "content": prompt}])).strip().upper()
+        # 只要回复以 Y 开头就认为是 YES
+        if not reply:
+            return True  # 空回复 → 默认检索
+        return reply.startswith("Y")
+    except Exception:
+        # 判断失败时默认检索（宁可多查也不要漏查）
+        return True

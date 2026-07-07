@@ -78,3 +78,4 @@ query_optimization:
   context_rewrite: true    # 上下文补全（需多轮记忆）
   decompose: true          # 子问题拆解
   decompose_max: 3         # 最多拆成几个子问题
+  rag_gating: true         # RAG 门控：LLM 判断是否需要检索本地知识库
