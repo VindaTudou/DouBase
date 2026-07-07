@@ -1,8 +1,9 @@
-"""智谱 AI Embedding API（embedding-2 模型）。智谱 API 兼容 OpenAI 接口。"""
+"""智谱 AI Embedding API, 带自动重试。智谱 API 兼容 OpenAI 接口。"""
 
 from openai import OpenAI
 
 from doubase.embedding.base import BaseEmbedder
+from doubase.api_retry import retry_call
 
 
 class ZhipuEmbedder(BaseEmbedder):
@@ -15,9 +16,11 @@ class ZhipuEmbedder(BaseEmbedder):
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        response = self._client.embeddings.create(
+        response = retry_call(
+            self._client.embeddings.create,
             model=self._model,
             input=texts,
+            label=f"Zhipu embed ({len(texts)} texts)",
         )
         return [item.embedding for item in response.data]
 

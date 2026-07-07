@@ -1,10 +1,11 @@
-"""OpenAI / OpenAI 兼容 LLM 客户端。"""
+"""OpenAI / OpenAI 兼容 LLM 客户端，带自动重试。"""
 
 from collections.abc import Iterator
 
 from openai import OpenAI
 
 from doubase.generation.base import BaseLLM
+from doubase.api_retry import retry_call
 
 
 class OpenAICompatLLM(BaseLLM):
@@ -15,19 +16,23 @@ class OpenAICompatLLM(BaseLLM):
         self._model = model
 
     def chat(self, messages: list[dict], **kwargs) -> str:
-        response = self._client.chat.completions.create(
+        response = retry_call(
+            self._client.chat.completions.create,
             model=self._model,
             messages=messages,
             **kwargs,
+            label=f"LLM chat ({self._model})",
         )
         return response.choices[0].message.content or ""
 
     def chat_stream(self, messages: list[dict], **kwargs) -> Iterator[str]:
-        stream = self._client.chat.completions.create(
+        stream = retry_call(
+            self._client.chat.completions.create,
             model=self._model,
             messages=messages,
             stream=True,
             **kwargs,
+            label=f"LLM chat_stream ({self._model})",
         )
         for chunk in stream:
             if chunk.choices[0].delta.content:
