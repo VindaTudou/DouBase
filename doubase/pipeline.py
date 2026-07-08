@@ -337,9 +337,10 @@ def _build_ask_prompt(
 
     messages = [{"role": "system", "content": system_prompt}]
 
-    # 注入对话历史
+    # 注入对话历史（sanitize 每条消息，防止历史中的 surrogate 字符）
     if history:
-        messages.extend(history)
+        for h in history:
+            messages.append({"role": h["role"], "content": _sanitize_text(h["content"])})
 
     # 当前问题 + 检索结果
     user_parts = [question]
@@ -451,8 +452,15 @@ def run_ask(
                     seen.add(key)
                     all_chunks.append(c)
         all_chunks.sort(key=lambda c: c["distance"])
-        # 对合并后的 chunks 做关键词重排序
-        chunks = rerank(question, all_chunks, top_k=min(top_k * 2, len(all_chunks)))
+        # 对合并后的 chunks 做关键词重排序 → LLM 精排
+        fusion_chunks = rerank(question, all_chunks, top_k=min(10, len(all_chunks)))
+        ret_config = config.get("retrieval", {})
+        if ret_config.get("llm_rerank", True) and fusion_chunks:
+            chunks = llm_rerank(question, fusion_chunks, llm, top_k=top_k)
+            if chunks and all(c.get("llm_score", 0) == 3 for c in chunks):
+                chunks = fusion_chunks[:top_k]
+        else:
+            chunks = fusion_chunks[:top_k]
         console.print(
             f"[dim]问题已拆解为 {len(sub_questions)} 个子问题, "
             f"检索到 {len(chunks)} 个去重片段（混合重排序）[/dim]"

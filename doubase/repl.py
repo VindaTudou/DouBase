@@ -210,7 +210,7 @@ def start_repl(config_path: str = None, resume: str = None, new: bool = False):
         try:
             user_input = console.input(PROMPT)
             if not user_input:
-                continue
+                raise EOFError
             user_input = user_input.strip()
             _touch_activity()
         except (EOFError, KeyboardInterrupt):

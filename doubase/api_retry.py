@@ -25,7 +25,7 @@ def is_retryable(exception: Exception) -> bool:
     for code in RETRYABLE_HTTP_CODES:
         if str(code) in error_str:
             # 确保不是 4xx（如 "429" 在 "Error code: 429" 中）
-            if f"error code: {code}" in error_str or f"status {code}" in error_str:
+            if f"error code: {code}" in error_str or f"status {code}" in error_str or f"http {code}" in error_str:
                 return True
 
     # 网络层错误

@@ -4,6 +4,13 @@ import re
 from doubase.embedding.base import BaseEmbedder
 from doubase.storage.vector_store import VectorStore
 
+# 匹配 surrogate 字符（U+D800-U+DFFF），LLM 偶尔输出非法 Unicode
+_SURROGATE_RE = re.compile(r'[\ud800-\udfff]')
+
+
+def _sanitize(text: str) -> str:
+    return _SURROGATE_RE.sub('', text)
+
 
 def _tokenize(text: str) -> set[str]:
     """将文本分解为可匹配的 token 集合（零依赖）。
@@ -139,7 +146,7 @@ def llm_rerank(query: str, chunks: list[dict], llm, top_k: int = 5) -> list[dict
     prompt = LLM_RERANK_PROMPT.format(query=query, chunks=chunk_texts)
 
     try:
-        reply = llm.chat([{"role": "user", "content": prompt}]).strip()
+        reply = _sanitize(llm.chat([{"role": "user", "content": prompt}])).strip()
     except Exception:
         # LLM 调用失败 → 返回原顺序
         return candidates[:top_k]

@@ -35,5 +35,5 @@ class OpenAICompatLLM(BaseLLM):
             label=f"LLM chat_stream ({self._model})",
         )
         for chunk in stream:
-            if chunk.choices[0].delta.content:
+            if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content

@@ -150,10 +150,10 @@ def should_retrieve(question: str, llm: BaseLLM, history: list[dict] = None) -> 
 
     try:
         reply = _sanitize(llm.chat([{"role": "user", "content": prompt}])).strip().upper()
-        # 只要回复以 Y 开头就认为是 YES
+        # LLM may add prefix like "Based on the analysis, YES" — check if YES is in the reply
         if not reply:
             return True  # 空回复 → 默认检索
-        return reply.startswith("Y")
+        return "YES" in reply
     except Exception:
         # 判断失败时默认检索（宁可多查也不要漏查）
         return True
