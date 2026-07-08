@@ -208,11 +208,9 @@ def start_repl(config_path: str = None, resume: str = None, new: bool = False):
         _check_idle_hint()
 
         try:
-            console.print(PROMPT, end="")
-            sys.stdout.flush()
-            user_input = sys.stdin.readline()
+            user_input = console.input(PROMPT)
             if not user_input:
-                raise EOFError
+                continue
             user_input = user_input.strip()
             _touch_activity()
         except (EOFError, KeyboardInterrupt):
