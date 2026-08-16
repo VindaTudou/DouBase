@@ -114,3 +114,32 @@ def test_chunk_by_headings_global_index():
     chunks = chunk_by_headings(text, "/tmp/test.md", "hash789", chunker)
     assert chunks[0].chunk_index == 0
     assert chunks[-1].chunk_index == len(chunks) - 1
+
+
+def test_chunk_text_includes_heading_path():
+    """短段落：chunk 文本前置完整标题路径（标题词可被检索到）"""
+    chunker = Chunker({"chunk_size": 512, "chunk_overlap": 64})
+    text = "# 智能体\n\n正文内容A\n\n## 感知模块\n\n正文内容B"
+    chunks = chunk_by_headings(text, "/tmp/test.md", "h1", chunker)
+    assert chunks[0].text.startswith("# 智能体\n正文内容A")
+    # 子标题 chunk 要带完整路径（大标题 + 小标题）
+    assert chunks[1].text.startswith("# 智能体\n## 感知模块\n正文内容B")
+
+
+def test_sliding_window_subchunks_each_carry_heading():
+    """长段落滑动窗口：每个子 chunk 都带同一标题前缀，而非只有第一个"""
+    chunker = Chunker({"chunk_size": 20, "chunk_overlap": 5})
+    text = "# 长标题\n" + "word " * 100
+    chunks = chunk_by_headings(text, "/tmp/test.md", "h2", chunker)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert c.text.startswith("# 长标题\n")
+        assert c.metadata["strategy"] in ("heading", "sliding_window")
+
+
+def test_preamble_chunk_has_no_heading_prefix():
+    """无标题 preamble：chunk 文本不带标题前缀"""
+    chunker = Chunker({"chunk_size": 512, "chunk_overlap": 64})
+    text = "开头没标题的段落\n\n# 之后才有标题\n正文"
+    chunks = chunk_by_headings(text, "/tmp/test.md", "h3", chunker)
+    assert chunks[0].text == "开头没标题的段落"

@@ -81,6 +81,22 @@ class Chunker:
         return chunks
 
 
+def _heading_prefix(heading_path: list[str]) -> str:
+    """把标题路径渲染为 markdown 标题行，作为 chunk 文本的前缀。
+
+    ['顺序查找', '平均查找长度'] -> "# 顺序查找\n## 平均查找长度\n"
+    空路径（无标题的 preamble）返回空字符串。
+
+    为什么并回标题：之前标题被单独放进 metadata，导致"答案就在标题行"的
+    内容（如「平均查找长度」）在 chunk 文本里检索不到；并回后向量与关键词
+    都能命中标题词。
+    """
+    if not heading_path:
+        return ""
+    lines = [f"{'#' * (i + 1)} {h}" for i, h in enumerate(heading_path)]
+    return "\n".join(lines) + "\n"
+
+
 def chunk_by_headings(
     text: str,
     source_path: str,
@@ -90,6 +106,7 @@ def chunk_by_headings(
     """Stage 1+2: 按 # 标题切分 -> 长段落滑动窗口兜底。
 
     仅对 .md 文件调用此函数。.docx/.pdf 继续使用 chunker.chunk_text()。
+    每个 chunk 的文本都带标题路径前缀（见 _heading_prefix），标题词可被检索到。
     """
     from doubase.chunker.heading_splitter import split_by_headings
 
@@ -99,11 +116,12 @@ def chunk_by_headings(
     for section in sections:
         if not section.body_text or not section.body_text.strip():
             continue  # 跳过空正文段落（如纯容器标题）
+        prefix = _heading_prefix(section.heading_path)
         tokens = chunker._encode(section.body_text)
         if len(tokens) <= chunker.chunk_size:
-            # 短段落 -> 单个 chunk
+            # 短段落 -> 单个 chunk（标题前缀 + 正文）
             all_chunks.append(Chunk(
-                text=section.body_text,
+                text=prefix + section.body_text,
                 source_path=source_path,
                 chunk_index=0,  # 后续全局编号修正
                 content_hash=content_hash,
@@ -114,7 +132,7 @@ def chunk_by_headings(
                 },
             ))
         else:
-            # 长段落 -> 滑动窗口切分
+            # 长段落 -> 滑动窗口切分，每个子 chunk 都带同一标题前缀
             sub_text = section.body_text
             sub_tokens = chunker._encode(sub_text)
             step = max(1, chunker.chunk_size - chunker.chunk_overlap)
@@ -131,7 +149,7 @@ def chunk_by_headings(
 
                 if chunk_text.strip():
                     all_chunks.append(Chunk(
-                        text=chunk_text.strip(),
+                        text=prefix + chunk_text.strip(),
                         source_path=source_path,
                         chunk_index=0,  # 后续全局编号修正
                         content_hash=content_hash,

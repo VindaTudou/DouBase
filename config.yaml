@@ -38,7 +38,7 @@ storage:
 
 # 分块参数 (数值型，直接配置)
 chunker:
-  chunk_size: 512
+  chunk_size: 256
   chunk_overlap: 64
   heading_split: true           # 启用 # 标题切分（仅 .md）
   semantic_merge: true          # 启用 LLM 保守合并
