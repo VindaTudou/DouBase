@@ -12,7 +12,8 @@ class OpenAICompatLLM(BaseLLM):
     """适用于 OpenAI 及任何兼容 API 的 LLM 客户端（Ollama、vLLM 等）。"""
 
     def __init__(self, api_key: str, model: str, base_url: str):
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        # timeout=60: 默认 600s 会让挂起的请求卡 10 分钟才重试，压缩到 1 分钟内触发退避重试
+        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=60)
         self._model = model
 
     def chat(self, messages: list[dict], **kwargs) -> str:
