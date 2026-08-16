@@ -3,13 +3,16 @@ from doubase.chunker.chunker import Chunk
 from doubase.chunker.semantic_merger import merge_semantically
 
 
-def _make_chunk(text, heading_text, strategy, chunk_idx):
+def _make_chunk(text, heading_text, strategy, chunk_idx, heading_path=None):
+    metadata = {"heading_text": heading_text, "strategy": strategy}
+    if heading_path is not None:
+        metadata["heading_path"] = heading_path
     return Chunk(
         text=text,
         source_path="/tmp/test.md",
         chunk_index=chunk_idx,
         content_hash="abc",
-        metadata={"heading_text": heading_text, "strategy": strategy},
+        metadata=metadata,
     )
 
 
@@ -67,6 +70,39 @@ def test_three_chunks_merge_chain():
     assert len(result) == 2
     assert "相关 A" in result[0].text and "相关 B" in result[0].text
     assert "无关 C" in result[1].text
+
+
+def test_same_heading_text_different_paths_not_merged():
+    """不同大标题下的同名子标题不合并（按完整 heading_path 分组）"""
+    chunks = [
+        _make_chunk("第一章-概述-内容1", "概述", "sliding_window", 0,
+                    heading_path=["第一章", "概述"]),
+        _make_chunk("第二章-概述-内容2", "概述", "sliding_window", 1,
+                    heading_path=["第二章", "概述"]),
+    ]
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "MERGE"
+    result = merge_semantically(chunks, mock_llm)
+    # 不同完整路径下各自独立，不应调 LLM、不应合并
+    mock_llm.chat.assert_not_called()
+    assert len(result) == 2
+
+
+def test_same_heading_path_chunks_still_merge():
+    """同一完整路径下的多个 chunk 仍正常合并"""
+    chunks = [
+        _make_chunk("概述-内容1", "概述", "sliding_window", 0,
+                    heading_path=["第一章", "概述"]),
+        _make_chunk("概述-内容2", "概述", "sliding_window", 1,
+                    heading_path=["第一章", "概述"]),
+    ]
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "MERGE"
+    result = merge_semantically(chunks, mock_llm)
+    mock_llm.chat.assert_called_once()
+    assert len(result) == 1
+    assert "概述-内容1" in result[0].text
+    assert "概述-内容2" in result[0].text
 
 
 def test_mixed_headings():

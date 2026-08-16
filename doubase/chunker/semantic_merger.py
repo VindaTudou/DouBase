@@ -30,13 +30,16 @@ def merge_semantically(chunks: list[Chunk], llm: BaseLLM) -> list[Chunk]:
     if not chunks:
         return []
 
-    # 按 heading_text 分组（保持组内原有顺序）
-    groups: dict[str, list[int]] = {}
+    # 按完整标题路径分组（保持组内原有顺序）。
+    # 仅用 heading_text 分组会导致不同大标题下同名的子标题被误合并，
+    # 因此以 heading_path（如 ["第一章", "概述"]）为分组键。
+    groups: dict[tuple, list[int]] = {}
     for i, c in enumerate(chunks):
-        heading = c.metadata.get("heading_text", "")
-        if heading not in groups:
-            groups[heading] = []
-        groups[heading].append(i)
+        heading_path = c.metadata.get("heading_path")
+        key = tuple(heading_path) if heading_path else (c.metadata.get("heading_text", ""),)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(i)
 
     # 标记哪些 index 需要移除（被合并到前一个）
     to_remove: set[int] = set()
