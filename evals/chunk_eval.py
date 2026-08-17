@@ -13,13 +13,16 @@
 
 用法:
   # 只估算各配置的 chunk 数与 embedding 费用（不调用任何 API）
-  /opt/homebrew/bin/python3.11 evals/chunk_eval.py --dry-run
+  /opt/homebrew/bin/python3.11 evals/chunk_eval.py --dry-run --corpus store
 
   # 正式评测（向量 + 混合重排序，确定性指标，不调 LLM）
-  /opt/homebrew/bin/python3.11 evals/chunk_eval.py
+  /opt/homebrew/bin/python3.11 evals/chunk_eval.py --corpus store
 
-  # 加上 LLM 精排（与线上 doubase ask 一致，较慢、有 LLM 成本）
-  /opt/homebrew/bin/python3.11 evals/chunk_eval.py --llm
+  # 完整生产链路（semantic_merge 分块 + LLM 精排检索），与线上 doubase ask 一致
+  /opt/homebrew/bin/python3.11 evals/chunk_eval.py --corpus store --merge --llm --only 256/64,512/64
+
+⚠️ 分块参数决策必须用 --corpus store（生产库完整语料），不要用默认 vault（仅笔记子集）——
+   子集结论与生产库实测可能相悖（见 evals/README.md 评测原则①）。
 """
 
 import argparse
