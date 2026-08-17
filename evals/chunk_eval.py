@@ -72,16 +72,27 @@ def collect_md_files(vault: str) -> list[str]:
     return sorted(str(p) for p in Path(vault).rglob("*.md"))
 
 
+def collect_store_sources(config: dict) -> list[str]:
+    """从现有生产库读取全部唯一 source_path（含 pdf/docx/代码总结），作为完整语料。"""
+    store = VectorStore(config["storage"]["persist_dir"],
+                        config["storage"]["collection_name"])
+    data = store._collection.get(include=["metadatas"], limit=1000000)
+    seen: dict[str, None] = {}
+    for m in data["metadatas"]:
+        seen.setdefault(m.get("source_path", ""), None)
+    return sorted(p for p in seen if p)
+
+
 def _content_hash(file_path: str) -> str:
     return hashlib.sha256(Path(file_path).read_bytes()).hexdigest()
 
 
-def ingest_vault(config: dict, chunk_size: int, chunk_overlap: int,
-                 vault: str, store: VectorStore, embedder) -> int:
-    """用指定分块参数把库中全部 .md 解析、分块、embedding 后写入 store。
+def ingest_sources(config: dict, chunk_size: int, chunk_overlap: int,
+                   sources: list[str], store: VectorStore, embedder) -> int:
+    """用指定分块参数把给定文件列表解析、分块、embedding 后写入 store。
 
-    与 run_ingest 一致：md 走 heading_split + 滑动窗口；semantic_merge 关闭。
-    返回导入的 chunk 总数。
+    与 run_ingest 一致：md 走 heading_split + 滑动窗口，pdf/docx 走 chunk_text；
+    semantic_merge 关闭（隔离滑动窗口参数）。返回导入的 chunk 总数。
     """
     chunker = Chunker({
         "chunk_size": chunk_size,
@@ -91,7 +102,7 @@ def ingest_vault(config: dict, chunk_size: int, chunk_overlap: int,
     })
     total = 0
     n_files = 0
-    for fp in collect_md_files(vault):
+    for fp in sources:
         parser = get_parser(fp)
         if parser is None:
             continue
@@ -99,9 +110,10 @@ def ingest_vault(config: dict, chunk_size: int, chunk_overlap: int,
             doc = parser.parse(fp)
         except Exception:
             continue
-        if doc.file_type != "markdown":
-            continue
-        raw_chunks = chunk_by_headings(doc.text, fp, _content_hash(fp), chunker)
+        if doc.file_type == "markdown":
+            raw_chunks = chunk_by_headings(doc.text, fp, _content_hash(fp), chunker)
+        else:
+            raw_chunks = chunker.chunk_text(doc.text, fp, _content_hash(fp))
         if not raw_chunks:
             continue
         try:
@@ -173,25 +185,38 @@ def score_variant(per_query: list, idx: int, k: int, relevant_index: dict,
     return hit / n_queries, recall_sum / n_queries, hit_mrr / n_queries
 
 
-def run_eval(test_sets: list[str], config: dict, embedder, use_llm: bool) -> list[dict]:
-    """对 CONFIGS 逐配置建库一次，对每套测试集打分。
+def run_eval(test_sets: list[str], config: dict, embedder, use_llm: bool,
+             corpus: str = "vault", configs: list[tuple[int, int]] = None) -> list[dict]:
+    """对 configs（默认全部 CONFIGS）逐配置建库一次，对每套测试集打分。
+
+    corpus:
+      - "vault"：Obsidian 库全部 .md（默认，历史口径）
+      - "store"：从现有生产库读取全部 source_path（含 pdf/docx/代码总结，完整语料）
 
     Returns:
         每配置一个 dict：{chunk_size, chunk_overlap, chunks, marker_warnings,
                            by_set: {测试集名: {K: {vector, hybrid}}}}
     """
+    if configs is None:
+        configs = CONFIGS
+    if corpus == "store":
+        sources = collect_store_sources(config)
+        console.print(f"[bold]语料[/bold]: 生产库 {len(sources)} 个源文件（完整语料）")
+    else:
+        sources = collect_md_files(VAULT)
+        console.print(f"[bold]语料[/bold]: Obsidian 库 {len(sources)} 个 .md")
     llm = get_llm(config) if use_llm else None
     all_queries = {ts: load_test_set(ts) for ts in test_sets}
     n_queries = {ts: len(qs) for ts, qs in all_queries.items()}
 
     results = []
-    for cs, ov in CONFIGS:
+    for cs, ov in configs:
         tag = " ← 当前" if (cs, ov) == (512, 64) else ""
         console.print(f"\n[bold]═══ {cs}/{ov}{tag} ═══[/bold]")
         tmp = tempfile.mkdtemp(prefix="doubase_chunk_eval_")
         try:
             store = VectorStore(tmp, "notes")
-            n_chunks = ingest_vault(config, cs, ov, VAULT, store, embedder)
+            n_chunks = ingest_sources(config, cs, ov, sources, store, embedder)
 
             by_set = {}
             n_marker_warn = 0
@@ -258,6 +283,10 @@ def main() -> None:
     parser.add_argument("--llm", action="store_true",
                         help="加入 LLM 精排（与线上一致，较慢）")
     parser.add_argument("--vault", default=VAULT, help="Obsidian 库路径")
+    parser.add_argument("--corpus", choices=["vault", "store"], default="vault",
+                        help="语料：vault=Obsidian 库全部 .md；store=生产库全部源文件（含 pdf/docx）")
+    parser.add_argument("--only", default="",
+                        help="只跑指定配置，逗号分隔，如 '256/64,512/64'")
     args = parser.parse_args()
 
     config = load_config()
@@ -265,8 +294,16 @@ def main() -> None:
         dry_run(config, args.vault)
         return
 
+    configs = None
+    if args.only:
+        configs = []
+        for part in args.only.split(","):
+            cs, ov = part.strip().split("/")
+            configs.append((int(cs), int(ov)))
+
     embedder = get_embedder(config)
-    results = run_eval(args.test_set, config, embedder, args.llm)
+    results = run_eval(args.test_set, config, embedder, args.llm,
+                       corpus=args.corpus, configs=configs)
     print_results(results, args.test_set)
 
     # 保存结果
