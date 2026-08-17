@@ -39,6 +39,7 @@ from rich.table import Table
 
 from doubase.config import load_config
 from doubase.chunker.chunker import Chunker, chunk_by_headings
+from doubase.chunker.semantic_merger import merge_semantically
 from doubase.embedding import get_embedder
 from doubase.generation import get_llm
 from doubase.parsers import get_parser
@@ -88,11 +89,13 @@ def _content_hash(file_path: str) -> str:
 
 
 def ingest_sources(config: dict, chunk_size: int, chunk_overlap: int,
-                   sources: list[str], store: VectorStore, embedder) -> int:
+                   sources: list[str], store: VectorStore, embedder,
+                   merge: bool = False, llm=None) -> int:
     """用指定分块参数把给定文件列表解析、分块、embedding 后写入 store。
 
-    与 run_ingest 一致：md 走 heading_split + 滑动窗口，pdf/docx 走 chunk_text；
-    semantic_merge 关闭（隔离滑动窗口参数）。返回导入的 chunk 总数。
+    与 run_ingest 一致：md 走 heading_split + 滑动窗口，pdf/docx 走 chunk_text。
+    merge=True 时对 markdown（跳过 Excalidraw 画图文件）调用 LLM 语义合并。
+    返回导入的 chunk 总数。
     """
     chunker = Chunker({
         "chunk_size": chunk_size,
@@ -112,6 +115,11 @@ def ingest_sources(config: dict, chunk_size: int, chunk_overlap: int,
             continue
         if doc.file_type == "markdown":
             raw_chunks = chunk_by_headings(doc.text, fp, _content_hash(fp), chunker)
+            if merge and "excalidraw" not in fp.lower():
+                try:
+                    raw_chunks = merge_semantically(raw_chunks, llm)
+                except Exception as e:
+                    console.print(f"  [yellow]合并失败，退回原始分块: {fp} ({e})[/yellow]")
         else:
             raw_chunks = chunker.chunk_text(doc.text, fp, _content_hash(fp))
         if not raw_chunks:
@@ -186,16 +194,19 @@ def score_variant(per_query: list, idx: int, k: int, relevant_index: dict,
 
 
 def run_eval(test_sets: list[str], config: dict, embedder, use_llm: bool,
-             corpus: str = "vault", configs: list[tuple[int, int]] = None) -> list[dict]:
+             corpus: str = "vault", configs: list[tuple[int, int]] = None,
+             merge: bool = False) -> list[dict]:
     """对 configs（默认全部 CONFIGS）逐配置建库一次，对每套测试集打分。
 
     corpus:
       - "vault"：Obsidian 库全部 .md（默认，历史口径）
       - "store"：从现有生产库读取全部 source_path（含 pdf/docx/代码总结，完整语料）
+    merge: True 时对 markdown 调用 LLM 语义合并。
+    use_llm: True 时检索链加 LLM 精排，并额外输出"全链路"档。
 
     Returns:
         每配置一个 dict：{chunk_size, chunk_overlap, chunks, marker_warnings,
-                           by_set: {测试集名: {K: {vector, hybrid}}}}
+                           by_set: {测试集名: {K: {vector, hybrid[, full]}}}}
     """
     if configs is None:
         configs = CONFIGS
@@ -205,7 +216,9 @@ def run_eval(test_sets: list[str], config: dict, embedder, use_llm: bool,
     else:
         sources = collect_md_files(VAULT)
         console.print(f"[bold]语料[/bold]: Obsidian 库 {len(sources)} 个 .md")
-    llm = get_llm(config) if use_llm else None
+    if merge:
+        console.print("[bold]LLM 语义合并: 开启[/bold]（跳过 Excalidraw）")
+    llm = get_llm(config) if (use_llm or merge) else None
     all_queries = {ts: load_test_set(ts) for ts in test_sets}
     n_queries = {ts: len(qs) for ts, qs in all_queries.items()}
 
@@ -216,7 +229,8 @@ def run_eval(test_sets: list[str], config: dict, embedder, use_llm: bool,
         tmp = tempfile.mkdtemp(prefix="doubase_chunk_eval_")
         try:
             store = VectorStore(tmp, "notes")
-            n_chunks = ingest_sources(config, cs, ov, sources, store, embedder)
+            n_chunks = ingest_sources(config, cs, ov, sources, store, embedder,
+                                      merge=merge, llm=llm)
 
             by_set = {}
             n_marker_warn = 0
@@ -241,6 +255,9 @@ def run_eval(test_sets: list[str], config: dict, embedder, use_llm: bool,
                         "hybrid": score_variant(per_query, 1, k, relevant_index,
                                                 n_queries[ts]),
                     }
+                    if use_llm:
+                        variants[k]["full"] = score_variant(
+                            per_query, 2, k, relevant_index, n_queries[ts])
                 by_set[Path(ts).name] = variants
             results.append({
                 "chunk_size": cs, "chunk_overlap": ov, "chunks": n_chunks,
@@ -255,10 +272,14 @@ def print_results(results: list[dict], test_sets: list[str]) -> None:
     for ts in test_sets:
         set_name = Path(ts).name
         for k in TOP_K:
+            has_full = "full" in results[0]["by_set"][set_name][k]
             table = Table(title=f"召回率对比 Top-{k}（{set_name}，片段级标注）")
             table.add_column("chunk_size/overlap", style="bold")
             table.add_column("chunks", justify="right")
-            for name, tag in (("纯向量", "vector"), ("混合", "hybrid")):
+            variants = [("纯向量", "vector"), ("混合", "hybrid")]
+            if has_full:
+                variants.append(("全链路", "full"))
+            for name, tag in variants:
                 table.add_column(f"{name} Hit@{k}", justify="right")
                 table.add_column(f"{name} Recall@{k}", justify="right")
                 table.add_column(f"{name} MRR", justify="right")
@@ -266,7 +287,7 @@ def print_results(results: list[dict], test_sets: list[str]) -> None:
                 cs, ov = r["chunk_size"], r["chunk_overlap"]
                 label = f"{cs}/{ov}" + (" ←当前" if (cs, ov) == (512, 64) else "")
                 row = [label, str(r["chunks"])]
-                for tag in ("vector", "hybrid"):
+                for _, tag in variants:
                     hit, recall, mrr = r["by_set"][set_name][k][tag]
                     row += [f"{hit:.3f}", f"{recall:.3f}", f"{mrr:.3f}"]
                 table.add_row(*row)
@@ -287,6 +308,8 @@ def main() -> None:
                         help="语料：vault=Obsidian 库全部 .md；store=生产库全部源文件（含 pdf/docx）")
     parser.add_argument("--only", default="",
                         help="只跑指定配置，逗号分隔，如 '256/64,512/64'")
+    parser.add_argument("--merge", action="store_true",
+                        help="对 markdown 启用 LLM 语义合并（较慢，跳过 Excalidraw）")
     args = parser.parse_args()
 
     config = load_config()
@@ -303,7 +326,7 @@ def main() -> None:
 
     embedder = get_embedder(config)
     results = run_eval(args.test_set, config, embedder, args.llm,
-                       corpus=args.corpus, configs=configs)
+                       corpus=args.corpus, configs=configs, merge=args.merge)
     print_results(results, args.test_set)
 
     # 保存结果
